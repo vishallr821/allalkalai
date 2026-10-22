@@ -126,7 +126,7 @@ export class AIClient {
         model: options.model,
         messages: options.messages,
         temperature: options.temperature ?? 0.2,
-        max_tokens: options.maxTokens ?? 1024,
+        max_tokens: options.maxTokens ?? 2048,
       };
 
       if (options.jsonMode) {
@@ -158,10 +158,14 @@ export class AIClient {
       }
 
       const data = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
+        choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>;
       };
 
-      const content = data?.choices?.[0]?.message?.content || "";
+      const msg = data?.choices?.[0]?.message;
+      let content = msg?.content || "";
+      if (!content && msg?.reasoning_content) {
+        content = msg.reasoning_content;
+      }
       if (!content) {
         throw new AIValidationError(provider, "Empty completion content received");
       }

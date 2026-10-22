@@ -31,9 +31,9 @@ const TAXONOMY: DepartmentKeywords[] = [
   },
   {
     department: "Electricity",
-    tamil: ["மின்சாரம்", "கரண்ட்", "விளக்கு", "தெருவிளக்கு", "மின்வயர்", "மின்மாற்றி", "ஒளி", "ஷார்ட்", "வோல்டேஜ்"],
-    hindi: ["बिजली", "करंट", "बत्ती", "स्ट्रीट लाइट", "लाइट", "ट्रांसफार्मर", "तार", "स्पार्क", "वोल्टेज", "अंधेरा"],
-    english: ["electricity", "electric", "power", "light", "streetlight", "transformer", "wire", "spark", "voltage", "blackout", "cable"],
+    tamil: ["மின்சாரம்", "கரண்ட்", "விளக்கு", "தெருவிளக்கு", "மின்வயர்", "மின்மாற்றி", "ஒளி", "ஷார்ட்", "வோல்டேஜ்", "கம்பம்", "மின்கம்பம்"],
+    hindi: ["बिजली", "करंट", "बत्ती", "स्ट्रीट लाइट", "लाइट", "ट्रांसफार्मर", "तार", "स्पार्क", "वोल्टेज", "अंधेरा", "खंभा"],
+    english: ["electricity", "electric", "power", "light", "streetlight", "transformer", "wire", "spark", "voltage", "blackout", "cable", "pole", "poles"],
     defaultEnglishTemplate: "Electrical power failure, broken streetlights or hazardous cable reported.",
   },
   {
@@ -47,7 +47,7 @@ const TAXONOMY: DepartmentKeywords[] = [
     department: "Roads",
     tamil: ["சாலை", "பள்ளம்", "குண்டு", "ரோடு", "தார்ச்சாலை", "போக்குவரத்து", "நடைபாதை", "வேகத்தடை"],
     hindi: ["सड़क", "गड्ढा", "रोड", "फुटपाथ", "डामर", "ट्रैफिक", "स्पीड ब्रेकर"],
-    english: ["road", "pothole", "pavement", "street", "crater", "asphalt", "footpath", "sidewalk", "highway", "culvert"],
+    english: ["road", "pothole", "potholes", "plot hole", "plot holes", "pavement", "street", "crater", "asphalt", "footpath", "sidewalk", "highway", "culvert"],
     defaultEnglishTemplate: "Road damage, hazardous potholes or broken pavement reported.",
   },
   {

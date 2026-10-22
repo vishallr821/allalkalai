@@ -250,7 +250,7 @@ export default function CitizenSubmit() {
       // Attempt submission via Backend AI Pipeline first
       try {
         const controller = new AbortController();
-        const tId = setTimeout(() => controller.abort(), 4000);
+        const tId = setTimeout(() => controller.abort(), 10000);
 
         const submitResponse = await fetch(`${API_BASE_URL}/api/submit-complaint`, {
           method: "POST",
@@ -332,26 +332,43 @@ export default function CitizenSubmit() {
 
         ticketId = directTicket.id;
 
-        // Intelligent client-side department classification
+        // Intelligent client-side multi-department classification
         const lower = text.toLowerCase();
-        let dept = "Roads";
-        let prio = "medium";
-        if (/water|தண்ணீர்|குடிநீர்|drain|pipe|sewage|leak/i.test(lower)) dept = "Water";
-        else if (/light|current|மின்சாரம்|power|wire|transformer|volt/i.test(lower)) dept = "Electricity";
-        else if (/garbage|waste|சாக்கடை|குப்பை|clean/i.test(lower)) dept = "Sanitation";
-        else if (/health|மருத்துவம்|hospital|dengue|mosquito/i.test(lower)) dept = "Health";
+        const detectedDepts: Array<{ department: string; text: string; priority: string }> = [];
 
-        await supabase.from("issues").insert({
-          parent_ticket_id: ticketId,
-          department: dept,
-          issue_text: text,
-          priority: prio,
-          status: "new",
-          lat: coords?.lat ?? null,
-          lng: coords?.lng ?? null,
-          deadline: new Date(Date.now() + 48 * 3600 * 1000).toISOString().split("T")[0],
-          sla_deadline: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
-        });
+        if (/water|தண்ணீர்|குடிநீர்|drain|pipe|sewage|leak|கசிவு/i.test(lower)) {
+          detectedDepts.push({ department: "Water", text: "Water supply / pipeline disruption reported", priority: "medium" });
+        }
+        if (/electricity|electric|light|current|மின்சாரம்|power|wire|transformer|volt|pole|poles|கம்பம்/i.test(lower)) {
+          detectedDepts.push({ department: "Electricity", text: "Electricity / streetlight / pole issue reported", priority: "medium" });
+        }
+        if (/garbage|waste|சாக்கடை|குப்பை|clean|துர்நாற்றம்/i.test(lower)) {
+          detectedDepts.push({ department: "Sanitation", text: "Sanitation and waste clearance reported", priority: "medium" });
+        }
+        if (/road|pothole|plot hole|crater|ரோடு|சாலை|பள்ளம்|traffic/i.test(lower)) {
+          detectedDepts.push({ department: "Roads", text: "Road damage and potholes reported", priority: "medium" });
+        }
+        if (/health|மருத்துவம்|hospital|dengue|mosquito|டாக்டர்/i.test(lower)) {
+          detectedDepts.push({ department: "Health", text: "Public health concern reported", priority: "medium" });
+        }
+
+        if (detectedDepts.length === 0) {
+          detectedDepts.push({ department: "Roads", text, priority: "medium" });
+        }
+
+        for (const item of detectedDepts) {
+          await supabase.from("issues").insert({
+            parent_ticket_id: ticketId,
+            department: item.department,
+            issue_text: text,
+            priority: item.priority,
+            status: "new",
+            lat: coords?.lat ?? null,
+            lng: coords?.lng ?? null,
+            deadline: new Date(Date.now() + 48 * 3600 * 1000).toISOString().split("T")[0],
+            sla_deadline: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+          });
+        }
       }
 
       if (photos.length > 0) {

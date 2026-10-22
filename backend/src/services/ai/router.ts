@@ -125,6 +125,12 @@ export class AIRouter {
    */
   private extractJson(raw: string): unknown {
     const trimmed = raw.trim();
+    const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (fenceMatch) {
+      try {
+        return JSON.parse(fenceMatch[1]);
+      } catch {}
+    }
     const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       throw new Error("No JSON object detected in response");
@@ -187,7 +193,7 @@ export class AIRouter {
             { role: "user", content: userPrompt },
           ],
           temperature: 0.2,
-          maxTokens: 1024,
+          maxTokens: 4096,
           timeoutMs: config.ai.tier1TimeoutMs,
           jsonMode: true,
         });

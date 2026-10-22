@@ -23,10 +23,10 @@ export const config = {
     // Nebius Token Factory / NVIDIA Model Endpoint
     nebius: {
       apiKey: process.env.NEBIUS_API_KEY || process.env.NVIDIA_API_KEY || "",
-      baseUrl: process.env.NEBIUS_BASE_URL || (process.env.NVIDIA_API_KEY && !process.env.NEBIUS_API_KEY ? "https://integrate.api.nvidia.com/v1" : "https://api.tokenfactory.nebius.ai/v1"),
-      tier1Model: process.env.MODEL_TIER1 || "nvidia/nemotron-3-nano",
+      baseUrl: process.env.NEBIUS_BASE_URL || (process.env.NVIDIA_API_KEY || (process.env.NEBIUS_API_KEY && process.env.NEBIUS_API_KEY.startsWith("nvapi-")) ? "https://integrate.api.nvidia.com/v1" : "https://api.tokenfactory.nebius.ai/v1"),
+      tier1Model: process.env.MODEL_TIER1 || "nvidia/nemotron-3.5-lightning-30b-a3b",
       tier2Model: process.env.MODEL_TIER2 || "nvidia/nemotron-3-super-120b-a12b",
-      visionModel: process.env.VISION_MODEL || "nvidia/nemotron-3.5-super-vl",
+      visionModel: process.env.VISION_MODEL || "nvidia/nemotron-3.5-super-vl-120b-a12b",
     },
     // Groq (Fallback)
     groq: {
@@ -34,8 +34,8 @@ export const config = {
       model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
     },
     // Timeouts per AGENT.md Section 7 Rule 2
-    tier1TimeoutMs: parseInt(process.env.TIER1_TIMEOUT_MS || "8000", 10),
-    tier2TimeoutMs: parseInt(process.env.TIER2_TIMEOUT_MS || "20000", 10),
+    tier1TimeoutMs: parseInt(process.env.TIER1_TIMEOUT_MS || "30000", 10),
+    tier2TimeoutMs: parseInt(process.env.TIER2_TIMEOUT_MS || "45000", 10),
   },
 
   // SLA Configuration

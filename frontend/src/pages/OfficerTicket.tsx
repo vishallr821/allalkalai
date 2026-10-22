@@ -228,22 +228,43 @@ export default function OfficerTicket() {
       }
 
       // 2. Call backend mark-resolved (returns instantly < 50ms)
-      const response = await fetch(`${API_BASE_URL}/api/mark-resolved`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          issueId: issue.id,
-          resolutionNote: resolutionNote.trim() || null,
-          photoUrl: uploadedPhotoUrl,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Backend error: ${response.statusText}`);
+      let resolvedByApi = false;
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/mark-resolved`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            issueId: issue.id,
+            resolutionNote: resolutionNote.trim() || null,
+            photoUrl: uploadedPhotoUrl,
+          }),
+        });
+        if (response.ok) {
+          resolvedByApi = true;
+          await response.json();
+        }
+      } catch (apiErr) {
+        console.warn("Backend mark-resolved unreachable, updating directly in Supabase:", apiErr);
       }
 
-      await response.json();
+      if (!resolvedByApi) {
+        const nowIso = new Date().toISOString();
+        const { error: directErr } = await supabase
+          .from("issues")
+          .update({
+            status: "resolved",
+            resolution_note: resolutionNote.trim() || null,
+            resolution_photo_url: uploadedPhotoUrl,
+            after_photo_url: uploadedPhotoUrl,
+            verification_status: uploadedPhotoUrl ? "pending" : "not_required",
+            updated_at: nowIso,
+          })
+          .eq("id", issue.id);
+
+        if (directErr) {
+          throw new Error(directErr.message || "Failed to mark issue as resolved in database");
+        }
+      }
 
       setIssue({
         ...issue,
@@ -456,15 +477,38 @@ export default function OfficerTicket() {
             </Button>
           )}
 
-          {issue.status === "in_progress" && (
+          {issue.status === "escalated" && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-3 mb-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <p className="text-red-800 font-bold text-base">
+                    ⚠ Escalated Issue Notice
+                  </p>
+                  <span className="text-xs bg-red-200 text-red-900 font-semibold px-2 py-0.5 rounded">
+                    {isOverdue(issue.sla_deadline) ? "SLA Breached" : "Escalated"}
+                  </span>
+                </div>
+              </div>
+              <p className="text-sm text-red-700">
+                This ticket has been escalated to your department head due to SLA deadline expiration. You can complete field resolution below to resolve and close this ticket.
+              </p>
+              {issue.escalation_reason && (
+                <div className="text-xs text-red-900 bg-red-100/70 p-2.5 rounded border border-red-200">
+                  <span className="font-bold">Breach Reason:</span> {issue.escalation_reason}
+                </div>
+              )}
+            </div>
+          )}
+
+          {(issue.status === "in_progress" || issue.status === "escalated") && (
             <div className="space-y-4">
               <Textarea
-                label="Resolution note (optional if you attach a photo)"
+                label={issue.status === "escalated" ? "Resolution note / Delay explanation" : "Resolution note (optional if you attach a photo)"}
                 id="resolution-note"
                 value={resolutionNote}
                 onChange={(e) => setResolutionNote(e.target.value)}
                 disabled={actionLoading}
-                placeholder="Describe what was done to resolve this issue..."
+                placeholder={issue.status === "escalated" ? "Describe how this issue was resolved and the reason for the SLA delay..." : "Describe what was done to resolve this issue..."}
                 className="h-32 resize-none"
               />
 
@@ -488,9 +532,13 @@ export default function OfficerTicket() {
                 variant="primary"
                 onClick={handleMarkResolved}
                 disabled={actionLoading || (!resolutionNote.trim() && resolutionPhotos.length === 0)}
-                className="w-full"
+                className={`w-full font-semibold ${issue.status === "escalated" ? "bg-amber-600 hover:bg-amber-700 text-white shadow-md" : ""}`}
               >
-                {actionLoading ? "Marking resolved..." : "Mark Resolved"}
+                {actionLoading
+                  ? "Marking resolved..."
+                  : issue.status === "escalated"
+                  ? "✓ Resolve & Close Escalated Ticket"
+                  : "Mark Resolved"}
               </Button>
             </div>
           )}
@@ -503,27 +551,6 @@ export default function OfficerTicket() {
               <p className="text-sm text-green-700 mt-1">
                 Resolved on {new Date(issue.updated_at).toLocaleString()}
               </p>
-            </div>
-          )}
-
-          {issue.status === "escalated" && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <p className="text-red-800 font-bold text-base">
-                  ⚠ This issue has been escalated.
-                </p>
-                <span className="text-xs bg-red-200 text-red-900 font-semibold px-2 py-0.5 rounded">
-                  {isOverdue(issue.sla_deadline) ? "SLA Breached" : "Escalated"}
-                </span>
-              </div>
-              <p className="text-sm text-red-700">
-                This ticket has been escalated to your department head for review.
-              </p>
-              {issue.escalation_reason && (
-                <div className="text-xs text-red-900 bg-red-100/70 p-2.5 rounded border border-red-200 mt-2">
-                  <span className="font-bold">Reason:</span> {issue.escalation_reason}
-                </div>
-              )}
             </div>
           )}
 
