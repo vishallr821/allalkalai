@@ -90,13 +90,20 @@ adminRouter.post("/api/demo/fast-forward", async (req: Request, res: Response, n
       }
     }
 
-    // If no issue found or specified, pick an existing open issue or synthesize demo issue
+    // If no issue found or specified, pick an existing open issue in the requested department
     if (!targetIssue && supabase) {
       try {
-        const { data: openIssues } = await supabase
+        let query = supabase
           .from("issues")
           .select("*")
-          .in("status", ["new", "assigned", "in_progress"])
+          .in("status", ["assigned", "in_progress", "new"]);
+
+        if (department) {
+          query = query.eq("department", department);
+        }
+
+        const { data: openIssues } = await query
+          .order("status", { ascending: false }) // prioritize 'assigned' / 'in_progress' over 'new'
           .limit(1);
 
         if (openIssues && openIssues.length > 0) {

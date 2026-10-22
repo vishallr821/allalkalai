@@ -46,68 +46,112 @@ export default function CitizenSubmit() {
     return () => clearTimeout(timer);
   }, [loading]);
 
-  const handleVoiceInput = () => {
+  const handleVoiceInput = async () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      setVoiceError(lang === "ta" ? "உங்கள் உலாவியில் குரல் உள்ளீடு ஆதரிக்கப்படவில்லை" : "Voice input is not supported in this browser");
+      setVoiceError(
+        lang === "ta"
+          ? "உங்கள் சாதனத்தில் குரல் உள்ளீடு ஆதரிக்கப்படவில்லை — தட்டச்சு செய்யவும்"
+          : "Voice input is not supported on this device — you can type instead"
+      );
       setTimeout(() => setVoiceError(""), 4000);
       return;
     }
 
     if (voiceListening) {
       if (voiceRecognitionRef.current) {
-        voiceRecognitionRef.current.stop();
+        try {
+          voiceRecognitionRef.current.stop();
+        } catch {}
       }
       setVoiceListening(false);
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.lang = lang === "ta" ? "ta-IN" : "en-IN";
-    recognition.interimResults = true;
-    recognition.continuous = false;
-
-    recognition.onstart = () => {
-      setVoiceListening(true);
-      setVoiceError("");
-    };
-
-    recognition.onresult = (event: any) => {
-      let interimTranscript = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          setText((prev) => prev + (prev ? " " : "") + transcript);
-        } else {
-          interimTranscript += transcript;
-        }
+    // Explicitly prompt and verify microphone permission via getUserMedia.
+    // In Android WebView / Capacitor, Web Speech API will immediately fail with 'not-allowed'
+    // unless the OS microphone permission prompt is triggered via getUserMedia.
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === "function") {
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Immediately stop tracks so the microphone is released for SpeechRecognition
+        audioStream.getTracks().forEach((track) => track.stop());
+      } catch (err: any) {
+        console.warn("Microphone permission check error:", err);
+        setVoiceError(
+          lang === "ta"
+            ? "மைக்ரோஃபோன் அனுமதி தேவை — நீங்கள் தட்டச்சு செய்யலாம்"
+            : "Microphone permission needed — you can type instead"
+        );
+        setTimeout(() => setVoiceError(""), 5000);
+        return;
       }
-    };
+    }
 
-    recognition.onerror = (event: any) => {
-      let message = "Voice input error";
-      if (event.error === "permission-denied" || event.error === "not-allowed") {
-        message = "Microphone permission needed — you can type instead";
-      } else if (event.error === "no-speech") {
-        message = "No speech detected — try speaking closer to microphone";
-      } else if (event.error === "network") {
-        message = "Network speech service unavailable — you can type instead";
-      }
-      setVoiceError(message);
-      setTimeout(() => setVoiceError(""), 4000);
-    };
-
-    recognition.onend = () => {
-      setVoiceListening(false);
-    };
-
-    voiceRecognitionRef.current = recognition;
     try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = lang === "ta" ? "ta-IN" : "en-IN";
+      recognition.interimResults = true;
+      recognition.continuous = false;
+
+      recognition.onstart = () => {
+        setVoiceListening(true);
+        setVoiceError("");
+      };
+
+      recognition.onresult = (event: any) => {
+        let interimTranscript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            setText((prev) => prev + (prev ? " " : "") + transcript);
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn("Speech recognition error:", event.error);
+        setVoiceListening(false);
+        let message = lang === "ta" ? "குரல் உள்ளீட்டில் பிழை ஏற்பட்டது" : "Voice input error";
+        if (event.error === "permission-denied" || event.error === "not-allowed") {
+          message =
+            lang === "ta"
+              ? "மைக்ரோஃபோன் அனுமதி தேவை — நீங்கள் தட்டச்சு செய்யலாம்"
+              : "Microphone permission needed — you can type instead";
+        } else if (event.error === "no-speech") {
+          message =
+            lang === "ta"
+              ? "குரல் கேட்கவில்லை — மைக்ரோஃபோன் அருகில் பேசவும்"
+              : "No speech detected — try speaking closer to microphone";
+        } else if (event.error === "network") {
+          message =
+            lang === "ta"
+              ? "இணைய பேச்சு சேவை கிடைக்கவில்லை — தட்டச்சு செய்யவும்"
+              : "Network speech service unavailable — you can type instead";
+        }
+        setVoiceError(message);
+        setTimeout(() => setVoiceError(""), 5000);
+      };
+
+      recognition.onend = () => {
+        setVoiceListening(false);
+      };
+
+      voiceRecognitionRef.current = recognition;
       recognition.start();
-    } catch {
+    } catch (err) {
+      console.warn("Failed to initialize speech recognition:", err);
       setVoiceListening(false);
+      setVoiceError(
+        lang === "ta"
+          ? "குரல் உள்ளீட்டை தொடங்க முடியவில்லை — தட்டச்சு செய்யவும்"
+          : "Could not start voice input — you can type instead"
+      );
+      setTimeout(() => setVoiceError(""), 4000);
     }
   };
 

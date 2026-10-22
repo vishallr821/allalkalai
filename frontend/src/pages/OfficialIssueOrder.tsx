@@ -43,59 +43,88 @@ export default function OfficialIssueOrder() {
     return () => clearTimeout(timer);
   }, [loading]);
 
-  const handleVoiceInput = () => {
+  const handleVoiceInput = async () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognition) return;
+    if (!SpeechRecognition) {
+      setVoiceError("Voice input is not supported on this device — you can type instead");
+      setTimeout(() => setVoiceError(""), 4000);
+      return;
+    }
 
     if (voiceListening) {
       if (voiceRecognitionRef.current) {
-        voiceRecognitionRef.current.stop();
+        try {
+          voiceRecognitionRef.current.stop();
+        } catch {}
       }
       setVoiceListening(false);
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.interimResults = true;
-    recognition.continuous = false;
+    // Prompt and verify microphone permission via getUserMedia first
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === "function") {
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStream.getTracks().forEach((track) => track.stop());
+      } catch (err: any) {
+        console.warn("Microphone permission check error:", err);
+        setVoiceError("Microphone permission needed — you can type instead");
+        setTimeout(() => setVoiceError(""), 5000);
+        return;
+      }
+    }
 
-    recognition.onstart = () => {
-      setVoiceListening(true);
-      setVoiceError("");
-    };
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.interimResults = true;
+      recognition.continuous = false;
 
-    recognition.onresult = (event: any) => {
-      let interimTranscript = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          setText((prev) => prev + (prev ? " " : "") + transcript);
-        } else {
-          interimTranscript += transcript;
+      recognition.onstart = () => {
+        setVoiceListening(true);
+        setVoiceError("");
+      };
+
+      recognition.onresult = (event: any) => {
+        let interimTranscript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            setText((prev) => prev + (prev ? " " : "") + transcript);
+          } else {
+            interimTranscript += transcript;
+          }
         }
-      }
-    };
+      };
 
-    recognition.onerror = (event: any) => {
-      let message = "Voice input error";
-      if (event.error === "permission-denied") {
-        message = "Microphone permission denied — you can type instead";
-      } else if (event.error === "no-speech") {
-        message = "No speech detected — try again or type instead";
-      } else if (event.error === "network") {
-        message = "Network error — please try again";
-      }
-      setVoiceError(message);
-    };
+      recognition.onerror = (event: any) => {
+        console.warn("Speech recognition error:", event.error);
+        setVoiceListening(false);
+        let message = "Voice input error";
+        if (event.error === "permission-denied" || event.error === "not-allowed") {
+          message = "Microphone permission needed — you can type instead";
+        } else if (event.error === "no-speech") {
+          message = "No speech detected — try speaking closer to microphone";
+        } else if (event.error === "network") {
+          message = "Network error — please try again or type instead";
+        }
+        setVoiceError(message);
+        setTimeout(() => setVoiceError(""), 5000);
+      };
 
-    recognition.onend = () => {
+      recognition.onend = () => {
+        setVoiceListening(false);
+      };
+
+      voiceRecognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      console.warn("Failed to initialize speech recognition:", err);
       setVoiceListening(false);
-    };
-
-    voiceRecognitionRef.current = recognition;
-    recognition.start();
+      setVoiceError("Could not start voice input — you can type instead");
+      setTimeout(() => setVoiceError(""), 4000);
+    }
   };
 
   const handleUseCurrentLocation = async () => {

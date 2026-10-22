@@ -14,7 +14,7 @@ import {
 import StatusBadge from "../components/ui/StatusBadge";
 import DepartmentBadge from "../components/ui/DepartmentBadge";
 import PhotoCapture from "../components/PhotoCapture";
-import { DEPT_COLORS } from "../lib/utils";
+import { DEPT_COLORS, getRemainingTime, getSLAProgressColor, isOverdue } from "../lib/utils";
 import { compressImage } from "../lib/imageCompression";
 
 export default function OfficerTicket() {
@@ -114,6 +114,33 @@ export default function OfficerTicket() {
 
     fetchIssue();
   }, [issueId, navigate]);
+
+  // Real-time subscription for live ticket updates (SLA deadline fast forward, escalation)
+  useEffect(() => {
+    if (!issueId) return;
+
+    const channel = supabase
+      .channel(`ticket-live-${issueId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "issues",
+          filter: `id=eq.${issueId}`,
+        },
+        (payload) => {
+          if (payload.new) {
+            setIssue((prev) => (prev ? { ...prev, ...(payload.new as Issue) } : (payload.new as Issue)));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [issueId]);
 
   // Polling for background photo verification completion
   useEffect(() => {
@@ -309,7 +336,18 @@ export default function OfficerTicket() {
 
             {issue.sla_deadline && (
               <div>
-                <p className="font-medium text-slate-600">SLA Deadline</p>
+                <div className="flex items-center justify-between">
+                  <p className="font-medium text-slate-600">SLA Deadline</p>
+                  <span
+                    className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{
+                      color: getSLAProgressColor(issue.sla_deadline),
+                      backgroundColor: isOverdue(issue.sla_deadline) ? "#FEE2E2" : "#E0F2FE",
+                    }}
+                  >
+                    {getRemainingTime(issue.sla_deadline)}
+                  </span>
+                </div>
                 <p className="text-slate-800">
                   {new Date(issue.sla_deadline).toLocaleString()}
                 </p>
@@ -469,13 +507,23 @@ export default function OfficerTicket() {
           )}
 
           {issue.status === "escalated" && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <p className="text-red-800 font-medium">
-                ⚠ This issue has been escalated.
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <p className="text-red-800 font-bold text-base">
+                  ⚠ This issue has been escalated.
+                </p>
+                <span className="text-xs bg-red-200 text-red-900 font-semibold px-2 py-0.5 rounded">
+                  {isOverdue(issue.sla_deadline) ? "SLA Breached" : "Escalated"}
+                </span>
+              </div>
+              <p className="text-sm text-red-700">
+                This ticket has been escalated to your department head for review.
               </p>
-              <p className="text-sm text-red-700 mt-1">
-                Contact your department head for instructions.
-              </p>
+              {issue.escalation_reason && (
+                <div className="text-xs text-red-900 bg-red-100/70 p-2.5 rounded border border-red-200 mt-2">
+                  <span className="font-bold">Reason:</span> {issue.escalation_reason}
+                </div>
+              )}
             </div>
           )}
 

@@ -198,13 +198,13 @@ export default function PublicDashboard() {
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
           {/* Logo & Brand */}
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <div className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-800 flex items-center justify-center text-white shadow-md font-bold text-base sm:text-lg">
               அ
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <h1 className="text-base sm:text-lg font-bold tracking-tight text-slate-950 font-serif truncate">
+                <h1 className="text-sm sm:text-lg font-bold tracking-tight text-slate-950 font-serif truncate">
                   {t.appName}
                 </h1>
                 <span className="hidden md:inline-block text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold border border-emerald-200 shrink-0">
@@ -222,7 +222,7 @@ export default function PublicDashboard() {
             <LanguageToggle />
             <button
               onClick={loadData}
-              className="p-1.5 sm:p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+              className="p-1.5 sm:p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors shrink-0"
               title="Refresh Stats"
               aria-label="Refresh data"
             >
@@ -230,10 +230,11 @@ export default function PublicDashboard() {
             </button>
             <Link
               to="/login"
-              className="inline-flex items-center gap-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white transition-all shadow-xs shrink-0"
+              className="inline-flex items-center gap-1 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white transition-all shadow-xs shrink-0 whitespace-nowrap"
             >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>{t.login}</span>
+              <LogIn className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">{t.login}</span>
+              <span className="sm:hidden">{lang === "ta" ? "உள்நுழைவு" : "Login"}</span>
             </Link>
           </div>
         </div>
@@ -764,10 +765,10 @@ export default function PublicDashboard() {
 
         <Link
           to="/login"
-          className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-3.5 py-1.5 rounded-full shadow-md active:scale-95 transition-all"
+          className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-3.5 py-1.5 rounded-full shadow-md active:scale-95 transition-all shrink-0 whitespace-nowrap"
         >
-          <LogIn className="w-3.5 h-3.5" />
-          <span>{t.login}</span>
+          <LogIn className="w-3.5 h-3.5 shrink-0" />
+          <span>{lang === "ta" ? "உள்நுழைவு" : "Login"}</span>
         </Link>
       </nav>
     </div>

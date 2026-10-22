@@ -9,7 +9,7 @@ export const LanguageToggle: React.FC<{ className?: string }> = ({ className = "
     <button
       type="button"
       onClick={toggleLanguage}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all border shadow-sm ${
+      className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all border shadow-xs shrink-0 whitespace-nowrap select-none ${
         lang === "ta"
           ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100"
           : "bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200"
@@ -17,8 +17,8 @@ export const LanguageToggle: React.FC<{ className?: string }> = ({ className = "
       title={lang === "en" ? "Switch to Tamil (தமிழ்)" : "Switch to English"}
       aria-label="Toggle language"
     >
-      <Languages className="w-3.5 h-3.5 text-slate-600" />
-      <span>{lang === "en" ? "தமிழ்" : "English"}</span>
+      <Languages className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+      <span className="shrink-0">{lang === "en" ? "தமிழ்" : "English"}</span>
     </button>
   );
 };
