@@ -858,8 +858,13 @@ export default function DepthDashboard() {
                         )}
                       </div>
 
-                      {status === "new" && (
+                      {(status === "new" || !issue.assigned_officer_id) && status !== "resolved" && (
                         <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
+                          {!issue.assigned_officer_id && status !== "new" && (
+                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded block">
+                              ⚠ Needs Officer Assignment
+                            </span>
+                          )}
                           <Select
                             id={`officer-${issue.id}`}
                             value={assigningIssueId === issue.id ? selectedOfficer : ""}
@@ -925,6 +930,38 @@ export default function DepthDashboard() {
                           <p className="mt-0.5 text-[11px] line-clamp-2">
                             {issue.escalation_reason || "Resolution deadline breached."}
                           </p>
+                        </div>
+                      )}
+
+                      {(activeTab === "new" || !issue.assigned_officer_id) && issue.status !== "resolved" && (
+                        <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
+                          {!issue.assigned_officer_id && issue.status !== "new" && (
+                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded block">
+                              ⚠ Needs Officer Assignment
+                            </span>
+                          )}
+                          <Select
+                            id={`officer-m-${issue.id}`}
+                            value={assigningIssueId === issue.id ? selectedOfficer : ""}
+                            onChange={(e) => setSelectedOfficer(e.target.value)}
+                            disabled={assigningIssueId === issue.id}
+                            className="text-xs"
+                          >
+                            <option value="">Select officer...</option>
+                            {officers.map((officer) => (
+                              <option key={officer.id} value={officer.id}>
+                                {officer.name} ({officer.currentWorkload})
+                              </option>
+                            ))}
+                          </Select>
+                          <Button
+                            variant="primary"
+                            onClick={() => handleAssignOfficer(issue.id, selectedOfficer)}
+                            disabled={assigningIssueId === issue.id || !selectedOfficer}
+                            className="w-full text-xs"
+                          >
+                            {assigningIssueId === issue.id ? "Assigning..." : "Assign"}
+                          </Button>
                         </div>
                       )}
                     </div>

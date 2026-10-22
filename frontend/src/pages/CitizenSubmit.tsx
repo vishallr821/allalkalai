@@ -346,7 +346,7 @@ export default function CitizenSubmit() {
           department: dept,
           issue_text: text,
           priority: prio,
-          status: "assigned",
+          status: "new",
           lat: coords?.lat ?? null,
           lng: coords?.lng ?? null,
           deadline: new Date(Date.now() + 48 * 3600 * 1000).toISOString().split("T")[0],
