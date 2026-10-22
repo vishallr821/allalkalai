@@ -11,10 +11,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'Grievance Routing System',
-        short_name: 'Grievance',
-        description: 'Citizen grievance and government order auto-routing',
-        theme_color: '#2563EB',
+        name: 'AllalKalai (அல்லல் களை)',
+        short_name: 'AllalKalai',
+        description: 'Autonomous Civic Grievance & Accountability Platform — Weed out the suffering (Thirukkural 555)',
+        theme_color: '#059669',
         background_color: '#F8FAFC',
         display: 'standalone',
         start_url: '/',

@@ -29,13 +29,9 @@ export default function OfficialIssueOrder() {
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceError, setVoiceError] = useState("");
   const voiceRecognitionRef = useRef<any>(null);
-  const [voiceSupported, setVoiceSupported] = useState(false);
-
-  useEffect(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    setVoiceSupported(!!SpeechRecognition);
-  }, []);
+  const [voiceSupported] = useState<boolean>(() => {
+    return typeof window !== "undefined" && Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  });
 
   useEffect(() => {
     if (!loading) return;

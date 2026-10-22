@@ -3,165 +3,267 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const supabase = createClient(
-  process.env.SUPABASE_URL || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ""
-);
+const supabaseUrl = process.env.SUPABASE_URL || "";
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error("❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+
+interface DemoAccount {
+  email: string;
+  role: "citizen" | "officer" | "dept_head" | "official";
+  name: string;
+  department: string | null;
+}
+
+const DEMO_ACCOUNTS: DemoAccount[] = [
+  { email: "citizen@demo.com", role: "citizen", name: "Anand Citizen", department: null },
+  { email: "officer-water@demo.com", role: "officer", name: "Kavitha Water Officer", department: "Water" },
+  { email: "officer-roads@demo.com", role: "officer", name: "Suresh Roads Officer", department: "Roads" },
+  { email: "officer-electricity@demo.com", role: "officer", name: "Muthu Electricity Officer", department: "Electricity" },
+  { email: "officer-sanitation@demo.com", role: "officer", name: "Selvi Sanitation Officer", department: "Sanitation" },
+  { email: "depthead-water@demo.com", role: "dept_head", name: "Dr. Ramanathan (Water Dept Head)", department: "Water" },
+  { email: "depthead-roads@demo.com", role: "dept_head", name: "Er. Rajeshwari (Roads Dept Head)", department: "Roads" },
+  { email: "depthead-electricity@demo.com", role: "dept_head", name: "Er. Venkat (Electricity Dept Head)", department: "Electricity" },
+  { email: "depthead-sanitation@demo.com", role: "dept_head", name: "Dr. Priya (Sanitation Dept Head)", department: "Sanitation" },
+  { email: "official@demo.com", role: "official", name: "Chief Commissioner IAS", department: null },
+];
 
 async function seedDemo() {
+  const startTime = Date.now();
+  console.log("===============================================================");
+  console.log("  🌱 ALLALKALAI IDEMPOTENT DEMO SEEDER                        ");
+  console.log("===============================================================\n");
+
   try {
-    console.log("🌱 Starting demo seed...\n");
+    // 1. Fetch all existing users in Supabase Auth to avoid "already registered" errors
+    console.log("1. Resolving authentication accounts...");
+    const { data: usersData, error: listError } = await supabase.auth.admin.listUsers({
+      perPage: 100,
+    });
+    if (listError) throw listError;
 
-    // 1. Create citizen user and profile
-    console.log("Creating citizen profile...");
-    const citizenAuthResponse = await supabase.auth.admin.createUser({
-      email: "citizen@demo.com",
-      password: "demo123456",
-      email_confirm: true,
+    const existingUsersByEmail = new Map<string, string>();
+    usersData.users.forEach((u) => {
+      if (u.email) existingUsersByEmail.set(u.email.toLowerCase(), u.id);
     });
 
-    if (citizenAuthResponse.error) throw citizenAuthResponse.error;
-    const citizenId = citizenAuthResponse.data.user!.id;
+    const userIds: Record<string, string> = {};
 
-    await supabase.from("profiles").insert({
-      id: citizenId,
-      name: "Demo Citizen",
-      role: "citizen",
-      department: null,
-    });
+    for (const acc of DEMO_ACCOUNTS) {
+      const emailLower = acc.email.toLowerCase();
+      let uid = existingUsersByEmail.get(emailLower);
 
-    console.log(`✓ Citizen created: ${citizenId} (citizen@demo.com)\n`);
+      if (uid) {
+        // Reset password to demo123456 so login always succeeds
+        await supabase.auth.admin.updateUserById(uid, {
+          password: "demo123456",
+          email_confirm: true,
+        });
+      } else {
+        const { data: newUserData, error: createError } = await supabase.auth.admin.createUser({
+          email: acc.email,
+          password: "demo123456",
+          email_confirm: true,
+        });
+        if (createError) throw createError;
+        uid = newUserData.user.id;
+      }
 
-    // 2. Create officers and dept heads across departments
-    const departments = ["Water", "Electricity", "Sanitation"];
-    const createdOfficers: { [key: string]: string } = {};
+      userIds[acc.email] = uid;
 
-    for (const dept of departments) {
-      // Create dept head
-      console.log(`Creating dept_head for ${dept}...`);
-      const deptHeadAuthResponse = await supabase.auth.admin.createUser({
-        email: `depthead-${dept.toLowerCase()}@demo.com`,
-        password: "demo123456",
-        email_confirm: true,
-      });
-
-      if (deptHeadAuthResponse.error) throw deptHeadAuthResponse.error;
-      const deptHeadId = deptHeadAuthResponse.data.user!.id;
-
-      await supabase.from("profiles").insert({
-        id: deptHeadId,
-        name: `${dept} Dept Head`,
-        role: "dept_head",
-        department: dept,
-      });
-
-      console.log(`✓ Dept head created for ${dept}: ${deptHeadId}\n`);
-
-      // Create officer
-      console.log(`Creating officer for ${dept}...`);
-      const officerAuthResponse = await supabase.auth.admin.createUser({
-        email: `officer-${dept.toLowerCase()}@demo.com`,
-        password: "demo123456",
-        email_confirm: true,
-      });
-
-      if (officerAuthResponse.error) throw officerAuthResponse.error;
-      const officerId = officerAuthResponse.data.user!.id;
-
-      await supabase.from("profiles").insert({
-        id: officerId,
-        name: `${dept} Officer`,
-        role: "officer",
-        department: dept,
-      });
-
-      createdOfficers[dept] = officerId;
-      console.log(`✓ Officer created for ${dept}: ${officerId}\n`);
+      // Upsert profile
+      await supabase.from("profiles").upsert(
+        {
+          id: uid,
+          name: acc.name,
+          role: acc.role,
+          department: acc.department,
+        },
+        { onConflict: "id" }
+      );
     }
+    console.log(`   ✓ ${DEMO_ACCOUNTS.length} demo profiles verified and synced.`);
 
-    // 3. Create sample ticket with 3 issues across departments
-    console.log("Creating sample ticket...");
-    const { data: ticketData, error: ticketError } = await supabase
+    // 2. Clean previous demo tickets for citizen@demo.com to reset state
+    console.log("\n2. Resetting previous demo tickets and issues...");
+    const citizenId = userIds["citizen@demo.com"];
+    const { data: oldTickets } = await supabase
+      .from("tickets")
+      .select("id")
+      .eq("citizen_id", citizenId);
+
+    if (oldTickets && oldTickets.length > 0) {
+      const ticketIds = oldTickets.map((t) => t.id);
+      // Delete associated issues
+      await supabase.from("issues").delete().in("parent_ticket_id", ticketIds);
+      await supabase.from("tickets").delete().in("id", ticketIds);
+    }
+    console.log("   ✓ Cleaned existing tickets for citizen@demo.com.");
+
+    // 3. Create Ticket A: Overdue Water Issue for Fast-Forward Escalation Demo
+    console.log("\n3. Seeding Ticket A: Overdue Water Issue (for Fast-Forward Demo)...");
+    const { data: ticketA, error: ticketAError } = await supabase
       .from("tickets")
       .insert({
         citizen_id: citizenId,
-        raw_text:
-          "There is no water supply in our street for 5 days, also the street lights on MG road have not worked for 2 weeks, and the drainage is clogged",
-        photo_url: null,
-        location: "Main Street, City Center",
+        raw_text: "Severe main water pipeline burst near Anna Nagar Roundtana. Water flooding road for 3 days.",
+        location: "Anna Nagar Roundtana, Chennai",
       })
-      .select();
+      .select()
+      .single();
 
-    if (ticketError) throw ticketError;
-    const ticketId = ticketData[0].id;
-    console.log(`✓ Ticket created: ${ticketId}\n`);
+    if (ticketAError) throw ticketAError;
 
-    // 4. Create 3 issues across different departments
-    const now = new Date();
-    const pastDeadline = new Date(now.getTime() - 60 * 60 * 1000); // 1 hour ago
+    // Past deadline: 3 hours ago
+    const pastSla = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
 
-    const issuesData = [
-      {
-        parent_ticket_id: ticketId,
+    async function insertIssueSafely(issueObj: any) {
+      try {
+        const { data, error } = await supabase.from("issues").insert(issueObj).select().single();
+        if (!error && data) return data;
+      } catch {}
+      // Fallback to base schema columns if extra columns are not in remote schema cache
+      const baseObj: any = {
+        parent_ticket_id: issueObj.parent_ticket_id,
+        department: issueObj.department,
+        issue_text: issueObj.issue_text,
+        priority: issueObj.priority || "medium",
+        assigned_officer_id: issueObj.assigned_officer_id || null,
+        status: issueObj.status || "new",
+        sla_deadline: issueObj.sla_deadline || null,
+        resolution_note: issueObj.resolution_note || null,
+        resolution_photo_url: issueObj.after_photo_url || issueObj.resolution_photo_url || null,
+      };
+      const { data, error } = await supabase.from("issues").insert(baseObj).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    const issueA = await insertIssueSafely({
+      parent_ticket_id: ticketA.id,
+      department: "Water",
+      issue_text: "Severe main water pipeline burst causing road flooding",
+      priority: "high",
+      assigned_officer_id: userIds["officer-water@demo.com"],
+      status: "assigned",
+      sla_deadline: pastSla,
+      lat: 13.0855,
+      lng: 80.216,
+    });
+
+    console.log(`   ✓ Overdue Issue created [ID: ${issueA.id}] (Status: assigned, SLA: overdue)`);
+
+    // 4. Create Ticket B: Baseline Road Pothole with Duplicate Group for Clustering Demo
+    console.log("\n4. Seeding Ticket B: Baseline Pothole (for Duplicate Clustering Demo)...");
+    const { data: ticketB, error: ticketBError } = await supabase
+      .from("tickets")
+      .insert({
+        citizen_id: citizenId,
+        raw_text: "Huge 2-foot dangerous pothole on 2nd Avenue Anna Nagar. Bikers are slipping.",
+        location: "12, 2nd Avenue, Anna Nagar, Chennai",
+      })
+      .select()
+      .single();
+
+    if (ticketBError) throw ticketBError;
+
+    // Create a duplicate group first if supported
+    let duplicateGroupId: string | null = null;
+    try {
+      const { data: groupData } = await supabase
+        .from("duplicate_groups")
+        .insert({
+          department: "Roads",
+          category: "pothole",
+          lat: 13.085,
+          lng: 80.215,
+          affected_citizens_count: 1,
+        })
+        .select()
+        .single();
+
+      if (groupData) duplicateGroupId = groupData.id;
+    } catch {
+      // duplicate_groups table optional
+    }
+
+    const issueB = await insertIssueSafely({
+      parent_ticket_id: ticketB.id,
+      department: "Roads",
+      issue_text: "Huge 2-foot dangerous pothole on 2nd Avenue Anna Nagar",
+      priority: "high",
+      assigned_officer_id: userIds["officer-roads@demo.com"],
+      status: "in_progress",
+      sla_deadline: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      lat: 13.085,
+      lng: 80.215,
+      duplicate_group_id: duplicateGroupId,
+    });
+
+    console.log(`   ✓ Baseline Pothole created [ID: ${issueB.id}] (Duplicate Group: ${duplicateGroupId || "active"})`);
+
+    // 5. Seed Two Verified Resolutions for the Public Showcase
+    console.log("\n5. Seeding Verified Resolution Showcase Items...");
+    const { data: showcaseTicket } = await supabase
+      .from("tickets")
+      .insert({
+        citizen_id: citizenId,
+        raw_text: "Repaired civic infrastructure showcase entries.",
+        location: "Chennai Metropolitan Area",
+      })
+      .select()
+      .single();
+
+    if (showcaseTicket) {
+      await insertIssueSafely({
+        parent_ticket_id: showcaseTicket.id,
+        department: "Roads",
+        issue_text: "Dangerous pothole cluster asphalt resurfacing and restoration",
+        status: "resolved",
+        verification_status: "verified",
+        verification_score: 0.94,
+        before_photo_url: "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop&q=80",
+        after_photo_url: "https://images.unsplash.com/photo-1578885136359-16c8bd4d3a8e?w=600&auto=format&fit=crop&q=80",
+        resolution_note: "Fresh bitumin asphalt laid and compacted with vibrating roller. Work completed.",
+        lat: 13.08,
+        lng: 80.27,
+      });
+
+      await insertIssueSafely({
+        parent_ticket_id: showcaseTicket.id,
         department: "Water",
-        issue_text: "No water supply in our street for 5 days",
-        deadline: null,
-        priority: "high",
-        assigned_officer_id: createdOfficers["Water"],
-        status: "assigned",
-        sla_deadline: pastDeadline.toISOString(), // OVERDUE for demo
-      },
-      {
-        parent_ticket_id: ticketId,
-        department: "Electricity",
-        issue_text: "Street lights on MG road have not worked for 2 weeks",
-        deadline: null,
-        priority: "high",
-        assigned_officer_id: null,
-        status: "new",
-        sla_deadline: null,
-      },
-      {
-        parent_ticket_id: ticketId,
-        department: "Sanitation",
-        issue_text: "Drainage is clogged",
-        deadline: null,
-        priority: "medium",
-        assigned_officer_id: null,
-        status: "new",
-        sla_deadline: null,
-      },
-    ];
+        issue_text: "Underground water pipeline breach sealed and supply restored",
+        status: "resolved",
+        verification_status: "verified",
+        verification_score: 0.91,
+        before_photo_url: "https://images.unsplash.com/photo-1584467735871-8e85353a8413?w=600&auto=format&fit=crop&q=80",
+        after_photo_url: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=600&auto=format&fit=crop&q=80",
+        resolution_note: "Defective valve replaced and pressurized pipe sleeve fitted. Flow verified.",
+        lat: 13.04,
+        lng: 80.25,
+      });
+    }
+    console.log("   ✓ Verified Showcase items initialized.");
 
-    console.log("Creating sample issues...");
-    const { error: issuesError } = await supabase
-      .from("issues")
-      .insert(issuesData);
-
-    if (issuesError) throw issuesError;
-    console.log(`✓ Created 3 issues across departments\n`);
-
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    console.log("✅ DEMO SEED COMPLETE!\n");
-    console.log("📊 Demo Data Created:");
-    console.log(`  • 1 Citizen: citizen@demo.com / demo123456`);
-    console.log(`  • 3 Dept Heads (one per department)`);
-    console.log(`    - depthead-water@demo.com / demo123456`);
-    console.log(`    - depthead-electricity@demo.com / demo123456`);
-    console.log(`    - depthead-sanitation@demo.com / demo123456`);
-    console.log(`  • 3 Officers (one per department)`);
-    console.log(`    - officer-water@demo.com / demo123456`);
-    console.log(`    - officer-electricity@demo.com / demo123456`);
-    console.log(`    - officer-sanitation@demo.com / demo123456`);
-    console.log(`  • 1 Sample Ticket with 3 Issues`);
-    console.log(
-      `    - Water issue: ASSIGNED & OVERDUE (for SLA escalation demo)\n`
-    );
-    console.log("🎯 Demo Flow:");
-    console.log("  1. Login as Water Dept Head → See overdue Water issue");
-    console.log("  2. Click 'Run SLA Check' → Watch it escalate live!");
-    console.log("  3. Login as Water Officer → Mark issue resolved");
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log("\n===============================================================");
+    console.log(`✅ DEMO SEED COMPLETE IN ${duration}s (< 10s target)`);
+    console.log("===============================================================");
+    console.log("🔑 Demo Login Credentials (all passwords: demo123456):");
+    console.log("   • Citizen:          citizen@demo.com");
+    console.log("   • Water Officer:    officer-water@demo.com");
+    console.log("   • Roads Officer:    officer-roads@demo.com");
+    console.log("   • Water Dept Head:  depthead-water@demo.com");
+    console.log("   • Roads Dept Head:  depthead-roads@demo.com");
+    console.log("   • Commissioner:     official@demo.com");
+    console.log("===============================================================\n");
   } catch (error) {
     console.error("❌ Seed error:", error);
     process.exit(1);

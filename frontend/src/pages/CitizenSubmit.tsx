@@ -12,12 +12,17 @@ import {
   LoadingState,
 } from "../components/ui";
 import PhotoCapture from "../components/PhotoCapture";
+import { compressImage } from "../lib/imageCompression";
+import { useLanguage } from "../lib/i18n";
+import TopNav from "../components/TopNav";
 
 export default function CitizenSubmit() {
   usePageTitle("File a Complaint");
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [text, setText] = useState("");
   const [location, setLocation] = useState("");
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [photos, setPhotos] = useState<File[]>([]);
   const [error, setError] = useState("");
   const [locationError, setLocationError] = useState("");
@@ -27,13 +32,9 @@ export default function CitizenSubmit() {
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceError, setVoiceError] = useState("");
   const voiceRecognitionRef = useRef<any>(null);
-  const [voiceSupported, setVoiceSupported] = useState(false);
-
-  useEffect(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    setVoiceSupported(!!SpeechRecognition);
-  }, []);
+  const [voiceSupported] = useState<boolean>(() => {
+    return typeof window !== "undefined" && Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  });
 
   useEffect(() => {
     if (!loading) return;
@@ -118,6 +119,7 @@ export default function CitizenSubmit() {
       );
 
       const { latitude, longitude } = position.coords;
+      setCoords({ lat: latitude, lng: longitude });
 
       const response = await fetch(`${API_BASE_URL}/api/reverse-geocode`, {
         method: "POST",
@@ -211,33 +213,44 @@ export default function CitizenSubmit() {
 
       console.log("[PIPELINE_STEP_1] Groq analysis response:", JSON.stringify(analysisData, null, 2));
 
-      const issues = await Promise.all(
+      const issueResults = await Promise.all(
         analysisData.issues.map(async (issue: any) => {
-          const { data: sessionData } = await supabase.auth.getSession();
-          console.log(`[BUG2_ISSUES_INSERT] Inserting issue for department: "${issue.department}", session: ${sessionData?.session ? "VALID" : "NULL"}`);
-          const result = await supabase.from("issues").insert({
-            parent_ticket_id: ticketId,
-            department: issue.department,
-            issue_text: issue.issue_text,
-            deadline: issue.deadline,
-            priority: issue.priority,
-            status: "new",
+          const createRes = await fetch(`${API_BASE_URL}/api/create-issue`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              parentTicketId: ticketId,
+              department: issue.department,
+              issueText: issue.issue_text,
+              deadline: issue.deadline,
+              priority: issue.priority,
+              lat: coords?.lat ?? null,
+              lng: coords?.lng ?? null,
+            }),
           });
-          if (result.error) {
-            console.error("[BUG2_ISSUES_ERROR] Full error object:", JSON.stringify(result.error, null, 2));
+
+          if (!createRes.ok) {
+            const errData = await createRes.json();
+            throw new Error(errData.error || "Failed to create issue via backend");
           }
-          return result;
+
+          return createRes.json();
         })
       );
 
-      if (issues.some((result) => result.error)) {
-        const failedError = issues.find((result) => result.error)?.error;
-        throw new Error(`Failed to create issues: ${JSON.stringify(failedError)}`);
+      const duplicates = issueResults.filter((r) => r.isDuplicate);
+      if (duplicates.length > 0) {
+        const count = duplicates[0].affectedCitizensCount || 2;
+        sessionStorage.setItem(
+          `duplicate_notice_${ticketId}`,
+          `${count - 1} other citizen(s) have also reported this problem in your immediate vicinity.`
+        );
       }
 
       if (photos.length > 0) {
-        for (const photoFile of photos) {
+        for (const rawPhoto of photos) {
           try {
+            const { file: photoFile } = await compressImage(rawPhoto, { maxDimension: 1280, quality: 0.8 });
             const fileExt = photoFile.name.split(".").pop() || "jpg";
             const fileName = `ticket-photos/${ticketId}/${crypto.randomUUID()}.${fileExt}`;
             const { error: uploadError } = await supabase.storage
@@ -264,7 +277,7 @@ export default function CitizenSubmit() {
               console.error("[BUG2_TICKET_PHOTOS_ERROR] Full error object:", JSON.stringify(photoResult.error, null, 2));
             }
           } catch (photoErr) {
-            console.error(`Error processing photo ${photoFile.name}:`, photoErr);
+            console.error(`Error processing photo ${rawPhoto.name}:`, photoErr);
           }
         }
       }
@@ -279,12 +292,13 @@ export default function CitizenSubmit() {
 
   return (
     <div className="bg-slate-50 min-h-screen">
-      <main className="max-w-xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-semibold text-slate-800 mb-2">
-            File a Complaint
+      <TopNav />
+      <main className="max-w-xl mx-auto px-4 sm:px-6 py-8">
+        <div className="mb-6">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 font-serif mb-1">
+            {t.submitComplaint}
           </h1>
-          <p className="text-slate-500">
+          <p className="text-slate-500 text-xs sm:text-sm">
             Describe your issue in detail. Our system will automatically route
             it to the correct department.
           </p>

@@ -15,6 +15,7 @@ import StatusBadge from "../components/ui/StatusBadge";
 import DepartmentBadge from "../components/ui/DepartmentBadge";
 import PhotoCapture from "../components/PhotoCapture";
 import { DEPT_COLORS } from "../lib/utils";
+import { compressImage } from "../lib/imageCompression";
 
 export default function OfficerTicket() {
   usePageTitle("Issue Details");
@@ -26,6 +27,34 @@ export default function OfficerTicket() {
   const [actionLoading, setActionLoading] = useState(false);
   const [resolutionPhotos, setResolutionPhotos] = useState<File[]>([]);
   const [resolutionNote, setResolutionNote] = useState("");
+
+  const [beforePhotoUrl, setBeforePhotoUrl] = useState<string | null>(null);
+  const [verificationData, setVerificationData] = useState<{
+    status: "pending" | "verified" | "flagged" | "needs_review" | "not_required";
+    score?: number;
+    reason?: string;
+  } | null>(null);
+
+  const fetchVerificationStatus = async (id: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/issue-verification/${id}`);
+      if (res.ok) {
+        const v = await res.json();
+        setVerificationData({
+          status: v.verification_status,
+          score: v.verification_score,
+          reason: v.verification_flag_reason,
+        });
+        if (v.before_photo_url) {
+          setBeforePhotoUrl(v.before_photo_url);
+        }
+        return v.verification_status;
+      }
+    } catch {
+      // Ignored if offline
+    }
+    return null;
+  };
 
   useEffect(() => {
     const fetchIssue = async () => {
@@ -51,6 +80,31 @@ export default function OfficerTicket() {
 
         if (fetchError) throw fetchError;
         setIssue(data);
+
+        // Fetch citizen before photo
+        let beforeUrl = data.before_photo_url;
+        if (!beforeUrl && data.parent_ticket_id) {
+          const { data: ticketPhoto } = await supabase
+            .from("ticket_photos")
+            .select("photo_url")
+            .eq("ticket_id", data.parent_ticket_id)
+            .limit(1)
+            .maybeSingle();
+          if (ticketPhoto?.photo_url) {
+            beforeUrl = ticketPhoto.photo_url;
+          } else {
+            const { data: parentTicket } = await supabase
+              .from("tickets")
+              .select("photo_url")
+              .eq("id", data.parent_ticket_id)
+              .maybeSingle();
+            beforeUrl = parentTicket?.photo_url;
+          }
+        }
+        setBeforePhotoUrl(beforeUrl || null);
+
+        // Fetch verification state
+        await fetchVerificationStatus(data.id);
       } catch (err) {
         setError(err instanceof Error ? err.message : "An error occurred");
       } finally {
@@ -60,6 +114,20 @@ export default function OfficerTicket() {
 
     fetchIssue();
   }, [issueId, navigate]);
+
+  // Polling for background photo verification completion
+  useEffect(() => {
+    if (!issueId || verificationData?.status !== "pending") return;
+
+    const interval = setInterval(async () => {
+      const status = await fetchVerificationStatus(issueId);
+      if (status && status !== "pending") {
+        clearInterval(interval);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [issueId, verificationData?.status]);
 
   const handleStartWork = async () => {
     if (!issue) return;
@@ -102,13 +170,44 @@ export default function OfficerTicket() {
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
+      let uploadedPhotoUrl: string | null = null;
+
+      // 1. If photo attached, compress client-side then upload to storage
+      if (resolutionPhotos.length > 0) {
+        const rawPhotoFile = resolutionPhotos[0];
+        try {
+          const { file: photoFile } = await compressImage(rawPhotoFile, { maxDimension: 1280, quality: 0.8 });
+          const fileExt = photoFile.name.split(".").pop() || "jpg";
+          const fileName = `resolution/${issue.id}/${crypto.randomUUID()}.${fileExt}`;
+          const { error: uploadError } = await supabase.storage
+            .from("resolution-photos")
+            .upload(fileName, photoFile);
+
+          if (!uploadError) {
+            const { data } = supabase.storage
+              .from("resolution-photos")
+              .getPublicUrl(fileName);
+            uploadedPhotoUrl = data.publicUrl;
+
+            await supabase.from("resolution_photos").insert({
+              issue_id: issue.id,
+              photo_url: uploadedPhotoUrl,
+              uploaded_by: user.id,
+            });
+          }
+        } catch (photoErr) {
+          console.error("Error uploading resolution photo:", photoErr);
+        }
+      }
+
+      // 2. Call backend mark-resolved (returns instantly < 50ms)
       const response = await fetch(`${API_BASE_URL}/api/mark-resolved`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           issueId: issue.id,
           resolutionNote: resolutionNote.trim() || null,
-          photoUrl: null,
+          photoUrl: uploadedPhotoUrl,
         }),
       });
 
@@ -117,41 +216,23 @@ export default function OfficerTicket() {
         throw new Error(errorData.error || `Backend error: ${response.statusText}`);
       }
 
-      if (resolutionPhotos.length > 0) {
-        for (const photoFile of resolutionPhotos) {
-          try {
-            const fileExt = photoFile.name.split(".").pop() || "jpg";
-            const fileName = `resolution/${issue.id}/${crypto.randomUUID()}.${fileExt}`;
-            const { error: uploadError } = await supabase.storage
-              .from("resolution-photos")
-              .upload(fileName, photoFile);
-
-            if (uploadError) {
-              console.error(`Failed to upload photo ${photoFile.name}:`, uploadError);
-              continue;
-            }
-
-            const { data } = supabase.storage
-              .from("resolution-photos")
-              .getPublicUrl(fileName);
-
-            await supabase.from("resolution_photos").insert({
-              issue_id: issue.id,
-              photo_url: data.publicUrl,
-              uploaded_by: user.id,
-            });
-          } catch (photoErr) {
-            console.error(`Error processing photo ${photoFile.name}:`, photoErr);
-          }
-        }
-      }
+      await response.json();
 
       setIssue({
         ...issue,
         status: "resolved",
         resolution_note: resolutionNote.trim() || null,
-        resolution_photo_url: null,
+        resolution_photo_url: uploadedPhotoUrl,
       });
+
+      if (uploadedPhotoUrl) {
+        setVerificationData({
+          status: "pending",
+          score: undefined,
+          reason: "AI photo verification is running in the background...",
+        });
+      }
+
       setResolutionPhotos([]);
       setResolutionNote("");
     } catch (err) {
@@ -235,14 +316,87 @@ export default function OfficerTicket() {
               </div>
             )}
 
-            {issue.resolution_photo_url && (
-              <div>
-                <p className="font-medium text-slate-600 mb-2">Resolution Photo</p>
-                <img
-                  src={issue.resolution_photo_url}
-                  alt="Resolution"
-                  className="max-w-full h-auto rounded-lg border border-slate-200"
-                />
+            {/* Before / After Photo Verification Section */}
+            {(beforePhotoUrl || issue.resolution_photo_url) && (
+              <div className="pt-4 border-t border-slate-200">
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                  <p className="font-semibold text-slate-800">
+                    Before / After Photo Verification
+                  </p>
+                  {verificationData && (
+                    <div>
+                      {verificationData.status === "verified" && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
+                          ✓ Verified ({Math.round((verificationData.score ?? 0.9) * 100)}% match) — Work Completed
+                        </span>
+                      )}
+                      {verificationData.status === "needs_review" && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                          ⚠ Needs Review ({Math.round((verificationData.score ?? 0.5) * 100)}%)
+                        </span>
+                      )}
+                      {verificationData.status === "flagged" && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 border border-red-300">
+                          ✕ Flagged ({Math.round((verificationData.score ?? 0.1) * 100)}%)
+                        </span>
+                      )}
+                      {verificationData.status === "pending" && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300 animate-pulse">
+                          ⚡ AI Vision Verification In Progress...
+                        </span>
+                      )}
+                      {verificationData.status === "not_required" && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">
+                          Not Required
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {verificationData?.reason && verificationData.status !== "verified" && (
+                  <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded p-2 mb-3">
+                    <span className="font-medium">Verification Note:</span> {verificationData.reason}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Before Photo */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+                      Before (Citizen Complaint)
+                    </p>
+                    {beforePhotoUrl ? (
+                      <img
+                        src={beforePhotoUrl}
+                        alt="Before repair"
+                        className="w-full h-48 object-cover rounded-md border border-slate-200"
+                      />
+                    ) : (
+                      <div className="w-full h-48 flex items-center justify-center bg-slate-100 rounded-md text-xs text-slate-400">
+                        No initial citizen photo provided
+                      </div>
+                    )}
+                  </div>
+
+                  {/* After Photo */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+                      After (Officer Resolution)
+                    </p>
+                    {issue.resolution_photo_url ? (
+                      <img
+                        src={issue.resolution_photo_url}
+                        alt="After repair"
+                        className="w-full h-48 object-cover rounded-md border border-slate-200"
+                      />
+                    ) : (
+                      <div className="w-full h-48 flex items-center justify-center bg-slate-100 rounded-md text-xs text-slate-400">
+                        Resolution photo pending upload
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>

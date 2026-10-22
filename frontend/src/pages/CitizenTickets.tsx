@@ -10,6 +10,8 @@ import {
 } from "../components/ui";
 import DepartmentBadge from "../components/ui/DepartmentBadge";
 import { formatRelativeTime } from "../lib/utils";
+import TopNav from "../components/TopNav";
+import { useLanguage } from "../lib/i18n";
 
 interface TicketWithDepartments extends Ticket {
   issues?: Array<{ department: string }>;
@@ -18,6 +20,7 @@ interface TicketWithDepartments extends Ticket {
 export default function CitizenTickets() {
   usePageTitle("My Complaints");
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const [tickets, setTickets] = useState<TicketWithDepartments[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -53,11 +56,6 @@ export default function CitizenTickets() {
     fetchTickets();
   }, [navigate]);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate("/login");
-  };
-
   const getUniqueDepartments = (
     ticket: TicketWithDepartments
   ): string[] => {
@@ -67,33 +65,23 @@ export default function CitizenTickets() {
 
   return (
     <div className="bg-slate-50 min-h-screen">
-      <main className="max-w-2xl mx-auto px-6 py-8">
-        <div className="flex justify-between items-start mb-8">
+      <TopNav />
+      <main className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
+        <div className="flex justify-between items-start mb-6">
           <div>
-            <h1 className="text-3xl font-semibold text-slate-800">
-              My Complaints
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 font-serif">
+              {t.myTickets}
             </h1>
-            <p className="text-slate-500 mt-1">
-              Track your complaints and their status
+            <p className="text-slate-500 text-xs sm:text-sm mt-1">
+              Track your filed civic issues and verify resolutions
             </p>
           </div>
-          <Button
-            variant="primary"
-            onClick={handleLogout}
-            className="text-sm"
-          >
-            Logout
-          </Button>
+          <Link to="/citizen/submit">
+            <Button variant="primary" className="text-xs bg-emerald-600 hover:bg-emerald-700">
+              + {t.submitComplaint}
+            </Button>
+          </Link>
         </div>
-
-        <Link
-          to="/citizen/submit"
-          className="inline-block mb-6"
-        >
-          <Button variant="primary" className="text-sm">
-            + File New Complaint
-          </Button>
-        </Link>
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">

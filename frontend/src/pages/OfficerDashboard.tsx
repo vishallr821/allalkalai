@@ -177,6 +177,21 @@ export default function OfficerDashboard() {
                         <div className="flex gap-2 items-center flex-wrap mb-2">
                           <DepartmentBadge department={issue.department as any} />
                           <StatusBadge status={issue.status as any} />
+                          {issue.verification_status && (
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                                issue.verification_status === "verified"
+                                  ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                  : issue.verification_status === "flagged"
+                                  ? "bg-red-100 text-red-800 border border-red-300"
+                                  : issue.verification_status === "pending"
+                                  ? "bg-blue-100 text-blue-800 border border-blue-300 animate-pulse"
+                                  : "bg-amber-100 text-amber-800 border border-amber-300"
+                              }`}
+                            >
+                              AI {issue.verification_status.replace(/_/g, " ")}
+                            </span>
+                          )}
                         </div>
                         <p className="text-slate-800 font-medium">{issue.issue_text}</p>
                       </div>

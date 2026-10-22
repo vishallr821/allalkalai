@@ -1,13 +1,18 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "Noto Serif Tamil", Georgia, Cambria, serif;
 }
 
 @layer base {
   html,
   body {
     background-color: #f8fafc;
-    color: #1e293b;
+    color: #0f172a;
+    -webkit-font-smoothing: antialiased;
+    scroll-behavior: smooth;
+    overflow-x: hidden;
   }
 }
+

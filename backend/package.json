@@ -7,6 +7,14 @@
     "dev": "npm run build && node dist/server.js",
     "build": "tsc",
     "seed": "npm run build && node dist/seed-demo.js",
+    "seed:demo": "npm run build && node dist/seed-demo.js",
+    "smoke": "npm run build && node dist/test-smoke.js",
+    "test:drills": "npm run build && node dist/test-failure-drills.js",
+    "test:load": "npm run build && node dist/test-concurrency.js",
+    "test:ai": "npm run build && node dist/test-ai-triage.js",
+    "test:p3": "npm run build && node dist/test-phase3-intelligence.js",
+    "test:p4": "npm run build && node dist/test-phase4-escalation.js",
+    "test:p5": "npm run build && node dist/test-phase5-ui.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -18,7 +26,8 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "groq-sdk": "^1.6.0"
+    "groq-sdk": "^1.6.0",
+    "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

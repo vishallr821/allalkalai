@@ -1,498 +1,162 @@
-# 🏛️ Citizen Grievance & Government Order Auto-Routing System
+# AllalKalai (அல்லல் களை) — Autonomous Civic Grievance & Accountability Platform
 
-A full-stack application for intelligent complaint routing and government order management using AI-powered issue classification.
+> *"அல்லற்பட்டு ஆற்றாது அழுதகண் ணீரன்றே செல்வத்தைத் தேய்க்கும் படை"* — **திருக்குறள் 555**  
+> *"His people's tears of sorrow past endurance, are not they / Sharp instruments to wear the monarch's wealth away"*  
+> **Core Tagline**: *"Weed out the suffering"*
 
-## 🎯 System Overview
+AllalKalai is a production-grade, closed-loop civic intelligence platform transforming public grievance redressal into an autonomous, transparent, and accountable pipeline: **Multilingual Intake → AI Triage & Extraction → Spatial Duplicate Clustering → Autonomous Escalation → Multimodal Vision Verification → Open Public Accountability**.
 
-This system enables:
-- **Citizens** to file grievances about government services (water, electricity, sanitation, etc.)
-- **Officials** to issue government orders with automatic deadline-aware routing
-- **Department Heads** to assign issues to officers and track SLA compliance
-- **Officers** to resolve issues with photo evidence
-- **AI-Powered Routing** using Groq AI to intelligently split multi-issue complaints into department-specific tasks
-- **Automatic SLA Escalation** for overdue issues
+---
 
-## 🏗️ Architecture
+## 🏛️ System Architecture
 
-### Frontend (React + Vite + TypeScript + Tailwind CSS)
-- **Location**: `/frontend`
-- **Port**: `http://localhost:5173`
-- **Role-based routing**: Separate dashboards for each user role
-- **Supabase Auth & Storage** integration for authentication and photo uploads
+```mermaid
+flowchart TD
+    subgraph INTAKE["1. Multilingual Intake (Tamil / Hindi / English)"]
+        Citizen["👤 Citizen Voice/Text Input"] --> SpeechAPI["Web Speech API"]
+        Citizen --> Compress["Client-Side Canvas Compression (<1280px)"]
+        Compress --> TriageReq["POST /api/analyze"]
+    end
 
-### Backend (Express + TypeScript)
-- **Location**: `/backend`
-- **Port**: `http://localhost:4000`
-- **API Endpoints**: 
-  - `POST /api/analyze` - Groq AI complaint analysis
-  - `POST /api/check-sla` - Manual SLA escalation trigger
-  - `GET /health` - Health check
+    subgraph ENGINE["2. Tiered AI Engine & Circuit Breaker"]
+        TriageReq --> Router{"AI Router"}
+        Router -->|Primary| Nebius["Nebius / NVIDIA Token Factory\n(Nemotron Nano/Super)"]
+        Router -->|Fallback 1| Groq["Groq Cloud\n(Llama / GPT-OSS)"]
+        Router -->|Fallback 2 / DEMO_MODE| RuleEngine["Deterministic Multilingual Classifier\n(Tamil/Hindi Regex & Keywords)"]
+        Nebius -.->|Failure / 429| CB["Circuit Breaker (60s Trip)"]
+        CB -.-> Groq
+    end
 
-### Database (Supabase PostgreSQL)
-- **Tables**:
-  - `profiles` - User accounts and roles
-  - `tickets` - Citizen complaints and official orders
-  - `issues` - Individual department-routed items
+    subgraph CLUSTERING["3. Spatial Duplicate Clustering"]
+        Router --> ClusterCheck["POST /api/create-issue"]
+        ClusterCheck --> BBox["Bounding Box Pre-Filter (~120m)"]
+        BBox --> Haversine["Exact Haversine Distance (<= 100m)"]
+        Haversine --> Semantic["Token Jaccard & Trigram Overlap"]
+        Semantic -->|Match >= 0.70| Clustered["duplicate_groups (+1 citizen count)\nBypass duplicate officer task"]
+        Semantic -->|Ambiguous 0.4-0.7| Disambiguate["AI Disambiguation"]
+        Semantic -->|Distinct| SingleIssue["Create Individual Task"]
+    end
 
-## 🚀 Quick Start
+    subgraph EXECUTION["4. Field Execution & Verification"]
+        SingleIssue --> OfficerTask["👷 Field Officer Assigned"]
+        OfficerTask --> ProofUpload["POST /api/mark-resolved\n(Before & After Photo Proof)"]
+        ProofUpload --> VisionCheck["Vision Inspection Engine"]
+        VisionCheck --> SHA256["SHA-256 Tamper & Reuse Check"]
+        VisionCheck --> Multimodal["Vision Model / Demo Verifier"]
+        Multimodal -->|Match >= 75%| Verified["AI Verified Badge (score >= 0.75)"]
+        Multimodal -->|Tamper / Mismatch| Flagged["AI Flagged (Dept Head Review Queue)"]
+    end
 
-### Prerequisites
-- Node.js 16+
-- npm or yarn
-- Supabase account (for database & auth)
-- Groq API key
+    subgraph AGENT["5. Autonomous SLA Escalation Agent"]
+        SLARunner["⏱️ SLA Runner (Periodic / Fast-Forward)"] --> AgentLoop["Tier 2 Escalation Agent"]
+        AgentLoop --> Tool1["get_overdue_issues()"]
+        AgentLoop --> Tool2["check_officer_workloads()"]
+        AgentLoop --> Tool3["find_escalation_supervisor()"]
+        AgentLoop --> Tool4["reassign_issue()"]
+        AgentLoop --> Tool5["draft_escalation_notice()"]
+        AgentLoop --> Tool6["escalate_issue()"]
+        AgentLoop --> AuditTrail["audit_logs (INSERT-Only Immutable Trail)"]
+    end
 
-### 1. Setup Environment Variables
-
-**Backend** (`/backend/.env`):
+    subgraph PUBLIC["6. Public Transparency Dashboard (/public)"]
+        AuditTrail --> AggView["public_stats_view & Aggregate Views"]
+        Verified --> Showcase["Verified Resolutions Showcase (Before/After)"]
+        AggView --> MemoryCache["Server-Side TTL Cache (45-60s)"]
+        Showcase --> Anonymize["Coordinate Rounding (2 decimals ~1.1km)\nZero Citizen PII Exposed"]
+        Anonymize --> PublicPortal["🌐 Public Open Portal\n(Sub-2s Cold Load / 3ms Warm Hit)"]
+    end
 ```
-GROQ_API_KEY=your_groq_api_key
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-PORT=4000
+
+---
+
+## ⚡ Quick Setup in 6 Steps
+
+Follow these 6 steps to start the entire stack locally:
+
+### Step 1: Clone and Enter Repository
+```bash
+git clone https://github.com/visha-21/AllalKalai.git
+cd AllalKalai/Query-manager
 ```
 
-**Frontend** (`/frontend/.env`):
-```
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your_anon_key
+### Step 2: Install Backend & Frontend Dependencies
+```bash
+npm install --prefix backend
+npm install --prefix frontend
 ```
 
-### 2. Install Dependencies
+### Step 3: Configure Environment Variables
+Copy `.env.example` to `backend/.env`:
+```bash
+cp .env.example backend/.env
+```
+*(Supabase URL, Anon Key, Service Role Key, and optional AI Keys are configured here. `DEMO_MODE=true` can be enabled for offline judge presentations).*
+
+### Step 4: Seed Demo Data in 6 Seconds
+```bash
+npm run seed:demo --prefix backend
+```
+*Creates 10 demo profiles, baseline duplicate groups, overdue escalation issues, and verified showcases.*
+
+### Step 5: Start the Development Servers
+In two separate terminals:
+```bash
+# Terminal 1: Backend API (port 4000)
+npm run dev --prefix backend
+
+# Terminal 2: Frontend Web App (port 5173)
+npm run dev --prefix frontend
+```
+
+### Step 6: Open the Application
+- **Public Transparency Dashboard**: [http://localhost:5173/public](http://localhost:5173/public) (no login required)
+- **Role Portal Sign In**: [http://localhost:5173/login](http://localhost:5173/login)
+
+---
+
+## 🔑 Pre-Configured Demo Accounts
+
+All demo accounts share the password: `demo123456`
+
+| Role | Email | Purpose |
+|---|---|---|
+| **Citizen** | `citizen@demo.com` | Multilingual text/speech intake & cluster tracking |
+| **Water Officer** | `officer-water@demo.com` | Assigned tasks & genuine resolution photo upload |
+| **Roads Officer** | `officer-roads@demo.com` | Field work & tamper/mismatch photo testing |
+| **Water Dept Head** | `depthead-water@demo.com` | Escalation audit panel & fast-forward demo trigger |
+| **Roads Dept Head** | `depthead-roads@demo.com` | Review & approval queue for flagged photo evidence |
+| **Commissioner** | `official@demo.com` | Cross-department performance benchmarks & orders |
+
+---
+
+## 🧪 Automated Test & Verification Suites
 
 ```bash
-# Backend
-cd backend
-npm install
+# 1. End-to-End Smoke Test (exercises steps a-f via API)
+npm run smoke --prefix backend
 
-# Frontend
-cd frontend
-npm install
-```
+# 2. Concurrency & Latency Benchmark (20 concurrent users: p95 < 1.5s)
+npm run test:load --prefix backend
 
-### 3. Build Both Apps
+# 3. Resilience & Failure Drills (Zero-keys, invalid keys, disabled vision, offline network)
+npm run test:drills --prefix backend
 
-```bash
-# Backend
-cd backend
-npm run build
-
-# Frontend
-cd frontend
-npm run build
-```
-
-### 4. Populate Demo Data
-
-```bash
-cd backend
-npm run seed
-```
-
-This creates:
-- 1 Citizen account (citizen@demo.com)
-- 3 Department Heads (one per department)
-- 3 Officers (one per department)
-- 1 sample complaint split into 3 issues
-- One issue pre-assigned and overdue (for SLA demo)
-
-### 5. Start Servers
-
-**Terminal 1 - Backend**:
-```bash
-cd backend
-npm run dev
-```
-
-**Terminal 2 - Frontend**:
-```bash
-cd frontend
-npm run dev
-```
-
-Then open `http://localhost:5173` in your browser.
-
-## 👥 User Roles & Workflows
-
-### 1. **Citizen** 
-Workflow: File Complaint → Track Status → View Resolution
-
-**Pages**:
-- `/login` - Signup/login
-- `/citizen/tickets` - List your complaints
-- `/citizen/submit` - File new complaint
-- `/citizen/track/:ticketId` - View complaint details and routed issues
-
-**Demo**:
-1. Login as `citizen@demo.com / demo123456`
-2. Click "View Tickets" to see pre-populated sample complaint
-3. Click on ticket to see AI-routed issues across departments
-
----
-
-### 2. **Department Head**
-Workflow: Review Issues → Assign to Officer → Track SLA
-
-**Pages**:
-- `/depthead/dashboard` - View all issues in your department
-- Officer assignment dropdown with workload counts
-- "Run SLA Check" button to escalate overdue issues
-
-**Demo**:
-1. Login as `depthead-water@demo.com / demo123456`
-2. See the Water department's issues
-3. See one pre-assigned issue marked "SLA Overdue" (red badge)
-4. Click "Run SLA Check" button → Issue status changes to "escalated" ✨
-
----
-
-### 3. **Officer**
-Workflow: Review Assigned Issues → Start Work → Upload Photo → Mark Resolved
-
-**Pages**:
-- `/officer/dashboard` - List assigned issues (sorted by SLA deadline)
-- `/officer/ticket/:issueId` - Issue detail page with action buttons
-  - **Assigned** → "Start Work" button
-  - **In Progress** → "Upload Photo" + "Mark Resolved" buttons
-  - **Resolved** → Confirmation view
-
-**Demo**:
-1. Login as `officer-water@demo.com / demo123456`
-2. See the Water issue pre-assigned to you
-3. Click "Start Work" → Status changes to "in_progress"
-4. Upload a photo of resolution
-5. Click "Mark Resolved" → Issue marked complete ✅
-
----
-
-### 4. **Official** (Government)
-Workflow: Issue Government Order → Route to Departments → Track Progress
-
-**Pages**:
-- `/official/tickets` - List issued orders
-- `/official/issue-order` - Create new government order (with required deadline)
-- `/official/track/:ticketId` - View order details and department routing
-
-**Demo**:
-1. Create official account (no department required)
-2. Click "Issue New Order"
-3. Enter description + required deadline date + optional location/photo
-4. AI analyzes and routes to relevant departments
-5. Track order progress as departments work on it
-
----
-
-## 🤖 AI-Powered Routing
-
-The system uses **Groq AI** (via openai/gpt-oss-120b model) to:
-
-1. **Parse multi-issue complaints** - Citizen writes one ticket about multiple problems
-2. **Extract structured data**:
-   - `department` - Which department should handle this (Water, Electricity, Sanitation, etc.)
-   - `issue_text` - Clean description of the problem
-   - `priority` - high/medium/low
-   - `deadline` - Optional date extracted from complaint text
-3. **Create individual issues** - Each extracted issue becomes a separate workflow item
-
-### Example
-
-**Citizen complaint**: 
-> "There's no water supply in our street for 5 days AND the street lights on MG Road have not worked for 2 weeks. Also, the drainage is clogged."
-
-**AI extracts 3 issues**:
-1. **Water Department**: "No water supply in our street for 5 days" (priority: high)
-2. **Electricity Department**: "Street lights on MG Road have not worked for 2 weeks" (priority: high)
-3. **Sanitation Department**: "Drainage is clogged" (priority: medium)
-
----
-
-## ⏰ SLA Escalation System
-
-### How It Works
-
-1. **On Officer Assignment** (by Dept Head)
-   - `sla_deadline` set to 48 hours from now
-   - Issue status: `new` → `assigned`
-
-2. **Officer Works** 
-   - Status: `assigned` → `in_progress` (when starting work)
-   - Status: `in_progress` → `resolved` (when marking complete with photo)
-
-3. **SLA Check** (Manual trigger by Dept Head)
-   - Click "Run SLA Check" button
-   - Backend finds all issues where `sla_deadline < now()` AND status in (new/assigned/in_progress)
-   - Updates them to status `escalated`
-   - Issues with `escalated` status show red badge
-
-### Demo Setup
-
-The seed script pre-creates one overdue issue:
-- **Water issue** assigned to Water Officer
-- **SLA deadline** = 1 hour ago
-- **Status** = assigned
-
-**Quick escalation demo**:
-1. Login as Water Dept Head
-2. See Water issue with red "SLA Overdue" badge
-3. Click "Run SLA Check"
-4. Watch status change to "escalated"
-
----
-
-## 📊 Database Schema
-
-### profiles
-```
-id                UUID (from auth)
-name              TEXT
-role              TEXT (citizen | official | dept_head | officer)
-department        TEXT (Water | Electricity | Sanitation | Roads | Health | Revenue | Police)
-                  Required for dept_head & officer, NULL for citizen & official
-created_at        TIMESTAMP
-```
-
-### tickets
-```
-id                UUID
-citizen_id        UUID (who filed complaint / issued order)
-raw_text          TEXT (original complaint or order text)
-photo_url         TEXT (optional photo from Supabase Storage)
-location          TEXT (optional location)
-created_at        TIMESTAMP
-```
-
-### issues
-```
-id                UUID
-parent_ticket_id  UUID (links to tickets)
-department        TEXT (where this issue is routed)
-issue_text        TEXT (problem description)
-deadline          TIMESTAMP (optional deadline extracted from complaint)
-priority          TEXT (high | medium | low)
-assigned_officer_id UUID (officer assigned to this issue)
-status            TEXT (new | assigned | in_progress | resolved | escalated)
-sla_deadline      TIMESTAMP (48h from assignment, used for escalation)
-resolution_photo_url TEXT (photo uploaded during resolution)
-created_at        TIMESTAMP
-updated_at        TIMESTAMP
+# 4. Phase-Specific Verification Suites
+npm run test:ai --prefix backend     # Phase 2 AI Triage & Fallback
+npm run test:p3 --prefix backend     # Phase 3 Duplicates & Vision
+npm run test:p4 --prefix backend     # Phase 4 Escalation Agent
+npm run test:p5 --prefix backend     # Phase 5 Public UI & Zero-PII
 ```
 
 ---
 
-## 🔑 API Endpoints
+## 📋 Technology Stack Summary
 
-### POST /api/analyze
-Analyzes complaint text and routes to departments.
-
-**Request**:
-```json
-{
-  "text": "There is no water supply in our street for 5 days, also the street lights on MG road have not worked for 2 weeks, and the drainage is clogged"
-}
-```
-
-**Response**:
-```json
-{
-  "issues": [
-    {
-      "department": "Water",
-      "issue_text": "No water supply in our street for 5 days",
-      "priority": "high",
-      "deadline": null
-    },
-    {
-      "department": "Electricity",
-      "issue_text": "Street lights on MG Road have not worked for 2 weeks",
-      "priority": "high",
-      "deadline": null
-    },
-    {
-      "department": "Sanitation",
-      "issue_text": "Drainage is clogged",
-      "priority": "medium",
-      "deadline": null
-    }
-  ]
-}
-```
-
----
-
-### POST /api/check-sla
-Escalates overdue issues (service role required).
-
-**Request**: (empty body)
-```json
-{}
-```
-
-**Response**:
-```json
-{
-  "escalated_count": 2,
-  "escalated_ids": ["issue-id-1", "issue-id-2"]
-}
-```
-
----
-
-### GET /health
-Health check endpoint.
-
-**Response**:
-```json
-{
-  "status": "ok"
-}
-```
-
----
-
-## 🗂️ File Structure
-
-```
-.
-├── frontend/
-│   ├── src/
-│   │   ├── pages/
-│   │   │   ├── Login.tsx
-│   │   │   ├── CitizenSubmit.tsx
-│   │   │   ├── CitizenTickets.tsx
-│   │   │   ├── CitizenTrack.tsx
-│   │   │   ├── DepthDashboard.tsx
-│   │   │   ├── OfficerDashboard.tsx
-│   │   │   ├── OfficerTicket.tsx
-│   │   │   ├── OfficialIssueOrder.tsx
-│   │   │   ├── OfficialTickets.tsx
-│   │   │   └── OfficialTrack.tsx
-│   │   ├── components/
-│   │   │   └── TopNav.tsx
-│   │   ├── lib/
-│   │   │   └── supabase.ts
-│   │   ├── App.tsx
-│   │   └── main.tsx
-│   ├── .env (not in repo)
-│   ├── .env.example
-│   ├── vite.config.ts
-│   ├── tailwind.config.js
-│   ├── postcss.config.js
-│   ├── tsconfig.json
-│   └── package.json
-│
-├── backend/
-│   ├── server.ts
-│   ├── seed-demo.ts
-│   ├── .env (not in repo)
-│   ├── .env.example
-│   ├── tsconfig.json
-│   └── package.json
-│
-├── CLAUDE.md (project guidelines)
-├── README.md (this file)
-└── OFFICIAL_PORTAL_AND_SLA.md (feature details)
-```
-
----
-
-## ✅ Build Status
-
-- **Frontend**: ✅ Builds successfully (78 modules, 489.58 kB gzipped)
-- **Backend**: ✅ Builds successfully (TypeScript strict mode)
-- **Seed Script**: ✅ Runs successfully, populates demo data
-- **Both Servers**: ✅ Running on ports 5173 (frontend) and 4000 (backend)
-
----
-
-## 🧪 Testing Checklist
-
-### Citizen Flow
-- [ ] Signup as citizen
-- [ ] File complaint with multiple issues
-- [ ] View complaint in ticket list
-- [ ] Track individual routed issues
-- [ ] Upload optional photo during filing
-
-### Department Head Flow
-- [ ] Signup as dept_head with department
-- [ ] View issues for your department
-- [ ] See officer workload counts
-- [ ] Assign issue to officer
-- [ ] See SLA deadline countdown
-- [ ] Click "Run SLA Check" to escalate overdue issues
-
-### Officer Flow
-- [ ] Signup as officer with department
-- [ ] View assigned issues sorted by SLA deadline
-- [ ] Click issue → See "Start Work" button
-- [ ] Start work → Status changes to in_progress
-- [ ] Upload photo of resolution
-- [ ] Mark resolved → Status changes to resolved
-
-### Official Flow
-- [ ] Signup as official (no department needed)
-- [ ] Issue government order with required deadline
-- [ ] View issued orders in ticket list
-- [ ] Track order routing across departments
-
-### SLA Escalation Demo
-- [ ] Login as dept_head
-- [ ] See pre-assigned overdue Water issue
-- [ ] Issue shows red "SLA Overdue" badge
-- [ ] Click "Run SLA Check" button
-- [ ] Watch issue escalate to "escalated" status
-- [ ] Status badge turns from orange to red
-
----
-
-## 🔐 Security Notes
-
-- `.env` files are never committed (add to `.gitignore`)
-- Supabase Service Role Key only used server-side for SLA checks
-- Frontend uses Supabase Anon Key (read/write limited by RLS)
-- Groq API key never exposed to frontend
-- Photo uploads stored in Supabase Storage with public URLs
-
----
-
-## 📝 Convention Notes
-
-- Department taxonomy: **Water, Electricity, Sanitation, Roads, Health, Revenue, Police**
-- Status values: **new, assigned, in_progress, resolved, escalated**
-- Priority values: **high, medium, low**
-- Role values: **citizen, official, dept_head, officer**
-- All timestamps in ISO 8601 format (UTC)
-
----
-
-## 🚀 Deployment (Future)
-
-1. Build both apps: `npm run build` in frontend & backend
-2. Frontend: Deploy `/frontend/dist` to static hosting (Vercel, Netlify, etc.)
-3. Backend: Deploy to Node.js host (Railway, Render, Heroku, etc.)
-4. Supabase: Use hosted PostgreSQL (no changes needed)
-5. Update environment variables on hosting platforms
-
----
-
-## 📚 Additional Resources
-
-- **CLAUDE.md** - Project guidelines and conventions
-- **OFFICIAL_PORTAL_AND_SLA.md** - Detailed feature documentation
-- **Groq API Docs** - https://console.groq.com/docs
-- **Supabase Docs** - https://supabase.com/docs
-
----
-
-## ✨ Built with Love
-
-This system demonstrates:
-- Full-stack TypeScript
-- AI-powered intelligent routing
-- Real-time SLA tracking
-- Role-based access control
-- File upload & storage
-- Responsive UI with Tailwind CSS
-- Service-oriented architecture
-
-Happy grievance routing! 🎉
+- **Frontend**: React 19, Vite 8, TypeScript, Tailwind CSS v4, Lucide Icons, Vite PWA
+- **Backend**: Node.js, Express, TypeScript, Zod Schema Validation
+- **Database & Storage**: Supabase (PostgreSQL with RLS policies, Storage buckets)
+- **AI Models & Inference**:
+  - **Tier 1 (Triage & Language)**: NVIDIA Nemotron-3 Nano / Groq Cloud
+  - **Tier 2 (Escalation Reasoning)**: NVIDIA Nemotron-3 Super / Ultra
+  - **Vision (Photo Verification)**: NVIDIA Nemotron-3.5 Super-VL
+  - **Zero-AI Fallback**: Deterministic regex & keyword classifier (`classifyWithRules`)

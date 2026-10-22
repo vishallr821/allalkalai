@@ -1,13 +1,16 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { usePageTitle } from "../hooks";
+import { useLanguage } from "../lib/i18n";
+import { LanguageToggle } from "../components/ui/LanguageToggle";
 import {
   Card,
   Input,
   Select,
   Button,
 } from "../components/ui";
+import { ArrowLeft, Award } from "lucide-react";
 
 const DEPARTMENTS = [
   "Water",
@@ -23,6 +26,7 @@ type UserRole = "citizen" | "official" | "dept_head" | "officer";
 
 export default function Login() {
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -119,28 +123,57 @@ export default function Login() {
   };
 
   return (
-    <div className="bg-slate-50 flex items-center justify-center min-h-screen px-4">
-      <Card className="w-full max-w-md">
+    <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-teal-950 flex flex-col items-center justify-center min-h-screen px-4 py-8 relative">
+      {/* Top Navbar */}
+      <div className="w-full max-w-md flex items-center justify-between mb-4 text-xs">
+        <Link
+          to="/public"
+          className="inline-flex items-center gap-1.5 text-slate-300 hover:text-white font-medium transition-colors"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>{t.publicDashboard}</span>
+        </Link>
+        <LanguageToggle />
+      </div>
+
+      <Card className="w-full max-w-md bg-white/95 backdrop-blur-md shadow-2xl border-slate-200">
         <div className="space-y-6">
-          {/* Header */}
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-800 text-center">
-              Grievance Routing System
+          {/* Header Branding */}
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-800 flex items-center justify-center text-white shadow-lg mx-auto font-bold text-xl">
+              அ
+            </div>
+            <h1 className="text-2xl font-bold text-slate-950 font-serif tracking-tight">
+              {t.appName}
             </h1>
-            <p className="text-sm text-slate-500 text-center mt-2">
-              {isSignUp ? "Create your account" : "Sign in to your account"}
+            <p className="text-xs text-slate-500 font-medium">
+              {t.appSubtitle}
+            </p>
+          </div>
+
+          {/* Thirukkural 555 Badge */}
+          <div className="bg-amber-50/80 border border-amber-200/80 rounded-xl p-3 text-center space-y-1">
+            <div className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 uppercase tracking-wider">
+              <Award className="w-3.5 h-3.5" />
+              <span>திருக்குறள் 555</span>
+            </div>
+            <p className="font-serif text-xs font-semibold text-amber-950 whitespace-pre-line leading-relaxed">
+              {t.thirukkuralTamil}
+            </p>
+            <p className="text-[11px] text-amber-800/90 italic leading-snug">
+              "{t.thirukkuralEnglish}"
             </p>
           </div>
 
           {/* Messages */}
           {error && (
-            <p className="text-red-600 text-sm bg-red-50 rounded-lg px-3 py-2">
+            <p className="text-red-700 text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2">
               {error}
             </p>
           )}
 
           {success && (
-            <p className="text-green-600 text-sm bg-green-50 rounded-lg px-3 py-2">
+            <p className="text-emerald-700 text-xs bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
               ✓ {success}
             </p>
           )}
@@ -156,7 +189,7 @@ export default function Login() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
-                  placeholder="John Doe"
+                  placeholder="Sundararajan"
                 />
 
                 <Select
@@ -168,10 +201,10 @@ export default function Login() {
                     setDepartment("");
                   }}
                 >
-                  <option value="citizen">Citizen</option>
-                  <option value="official">Official</option>
-                  <option value="dept_head">Department Head</option>
-                  <option value="officer">Officer</option>
+                  <option value="citizen">Citizen (குடிமகன்)</option>
+                  <option value="official">Official (முதன்மை அலுவலர்)</option>
+                  <option value="dept_head">Department Head (துறைத் தலைவர்)</option>
+                  <option value="officer">Officer (கள அலுவலர்)</option>
                 </Select>
 
                 {(role === "dept_head" || role === "officer") && (
@@ -200,7 +233,7 @@ export default function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              placeholder="you@example.com"
+              placeholder="official@allalkalai.gov.in"
             />
 
             <Input
@@ -217,32 +250,41 @@ export default function Login() {
               variant="primary"
               type="submit"
               disabled={loading}
-              className="w-full"
+              className="w-full bg-emerald-600 hover:bg-emerald-700"
             >
               {loading
-                ? "Loading..."
+                ? "Signing in..."
                 : isSignUp
                   ? "Create Account"
-                  : "Sign In"}
+                  : "Sign In to Portal"}
             </Button>
           </form>
 
-          {/* Toggle */}
-          <div className="border-t border-slate-200 pt-4">
-            <Button
-              variant="ghost"
+          {/* Toggle Sign Up / Sign In */}
+          <div className="border-t border-slate-200 pt-3 text-center space-y-2">
+            <button
               type="button"
               onClick={() => {
                 setIsSignUp(!isSignUp);
                 setError("");
                 setSuccess("");
               }}
-              className="w-full text-sm"
+              className="text-xs text-slate-600 hover:text-emerald-700 font-semibold transition-colors"
             >
               {isSignUp
                 ? "Already have an account? Sign in"
-                : "Don't have an account? Sign up"}
-            </Button>
+                : "Don't have an account? Register as Citizen"}
+            </button>
+
+            <div>
+              <Link
+                to="/public"
+                className="text-xs text-emerald-700 hover:text-emerald-900 font-medium inline-flex items-center gap-1"
+              >
+                <span>Browse Public Transparency Dashboard</span>
+                <span>→</span>
+              </Link>
+            </div>
           </div>
         </div>
       </Card>

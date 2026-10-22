@@ -230,6 +230,19 @@ export default function CitizenTrack() {
           </div>
         )}
 
+        {(sessionStorage.getItem(`duplicate_notice_${ticketId}`) || issues.some((i) => i.duplicate_group_id)) && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-900 px-4 py-3 rounded-xl mb-6 flex items-start gap-3 shadow-xs">
+            <span className="text-xl">👥</span>
+            <div>
+              <p className="font-semibold text-sm">Similar Complaints Clustered in Your Area</p>
+              <p className="text-xs text-amber-800 mt-0.5">
+                {sessionStorage.getItem(`duplicate_notice_${ticketId}`) ||
+                  "Multiple citizens in your immediate vicinity have reported this same civic infrastructure issue. Linked to cluster for prioritized response."}
+              </p>
+            </div>
+          </div>
+        )}
+
         <Card className="mb-8">
           <h1 className="text-xl font-semibold text-slate-800 mb-6">
             Complaint Details
