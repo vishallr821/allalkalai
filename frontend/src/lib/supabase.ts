@@ -42,6 +42,7 @@ export interface Issue {
   resolution_note: string | null;
   before_photo_url?: string | null;
   after_photo_url?: string | null;
+  photo_url?: string | null;
   verification_status?: "pending" | "verified" | "flagged" | "needs_review" | "not_required";
   verification_score?: number | null;
   verification_flag_reason?: string | null;

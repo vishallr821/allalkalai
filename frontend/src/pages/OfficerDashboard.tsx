@@ -172,29 +172,49 @@ export default function OfficerDashboard() {
                   className="block hover:shadow-lg transition-all duration-150 rounded-lg"
                 >
                   <Card accentColor={deptColor}>
-                    <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex-1">
                         <div className="flex gap-2 items-center flex-wrap mb-2">
                           <DepartmentBadge department={issue.department as any} />
                           <StatusBadge status={issue.status as any} />
-                          {issue.verification_status && (
-                            <span
-                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                                issue.verification_status === "verified"
-                                  ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                                  : issue.verification_status === "flagged"
-                                  ? "bg-red-100 text-red-800 border border-red-300"
-                                  : issue.verification_status === "pending"
-                                  ? "bg-blue-100 text-blue-800 border border-blue-300 animate-pulse"
-                                  : "bg-amber-100 text-amber-800 border border-amber-300"
-                              }`}
-                            >
-                              AI {issue.verification_status.replace(/_/g, " ")}
+                          {issue.status === "resolved" ? (
+                            issue.verification_status && (
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                                  issue.verification_status === "verified"
+                                    ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                    : issue.verification_status === "flagged"
+                                    ? "bg-red-100 text-red-800 border border-red-300"
+                                    : issue.verification_status === "pending"
+                                    ? "bg-blue-100 text-blue-800 border border-blue-300 animate-pulse"
+                                    : "bg-amber-100 text-amber-800 border border-amber-300"
+                                }`}
+                              >
+                                AI {issue.verification_status.replace(/_/g, " ")}
+                              </span>
+                            )
+                          ) : (
+                            (issue.before_photo_url || issue.photo_url) && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 inline-flex items-center gap-1">
+                                📷 Photo Evidence
+                              </span>
+                            )
+                          )}
+                          {issue.duplicate_group_id && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-amber-50 text-amber-800 border border-amber-200 inline-flex items-center gap-1">
+                              👥 Clustered Issue
                             </span>
                           )}
                         </div>
                         <p className="text-slate-800 font-medium">{issue.issue_text}</p>
                       </div>
+                      {issue.before_photo_url && (
+                        <img
+                          src={issue.before_photo_url}
+                          alt="Citizen evidence"
+                          className="w-14 h-14 rounded-lg object-cover border border-slate-200 shadow-2xs shrink-0"
+                        />
+                      )}
                     </div>
 
                     {issue.sla_deadline && (

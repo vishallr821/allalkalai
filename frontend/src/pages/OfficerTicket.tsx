@@ -204,23 +204,58 @@ export default function OfficerTicket() {
         const rawPhotoFile = resolutionPhotos[0];
         try {
           const { file: photoFile } = await compressImage(rawPhotoFile, { maxDimension: 1280, quality: 0.8 });
-          const fileExt = photoFile.name.split(".").pop() || "jpg";
-          const fileName = `resolution/${issue.id}/${crypto.randomUUID()}.${fileExt}`;
-          const { error: uploadError } = await supabase.storage
-            .from("resolution-photos")
-            .upload(fileName, photoFile);
+          const reader = new FileReader();
+          const base64Promise = new Promise<string>((resolve) => {
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(photoFile);
+          });
+          const base64Data = await base64Promise;
 
-          if (!uploadError) {
-            const { data } = supabase.storage
-              .from("resolution-photos")
-              .getPublicUrl(fileName);
-            uploadedPhotoUrl = data.publicUrl;
-
-            await supabase.from("resolution_photos").insert({
-              issue_id: issue.id,
-              photo_url: uploadedPhotoUrl,
-              uploaded_by: user.id,
+          // Attempt backend upload with service role first
+          try {
+            const upRes = await fetch(`${API_BASE_URL}/api/upload-photo`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                bucket: "resolution-photos",
+                base64: base64Data,
+                contentType: photoFile.type || "image/jpeg",
+              }),
             });
+            if (upRes.ok) {
+              const upData = await upRes.json();
+              uploadedPhotoUrl = upData.publicUrl;
+            }
+          } catch (backendUpErr) {
+            console.warn("Backend upload failed, attempting direct Supabase or data URI:", backendUpErr);
+          }
+
+          if (!uploadedPhotoUrl) {
+            // Direct Supabase storage attempt
+            const fileExt = photoFile.name.split(".").pop() || "jpg";
+            const fileName = `resolution/${issue.id}/${crypto.randomUUID()}.${fileExt}`;
+            const { error: uploadError } = await supabase.storage
+              .from("resolution-photos")
+              .upload(fileName, photoFile);
+
+            if (!uploadError) {
+              const { data } = supabase.storage
+                .from("resolution-photos")
+                .getPublicUrl(fileName);
+              uploadedPhotoUrl = data.publicUrl;
+            } else {
+              uploadedPhotoUrl = base64Data;
+            }
+          }
+
+          if (uploadedPhotoUrl) {
+            try {
+              await supabase.from("resolution_photos").insert({
+                issue_id: issue.id,
+                photo_url: uploadedPhotoUrl,
+                uploaded_by: user.id,
+              });
+            } catch {}
           }
         } catch (photoErr) {
           console.error("Error uploading resolution photo:", photoErr);
@@ -256,6 +291,7 @@ export default function OfficerTicket() {
             resolution_note: resolutionNote.trim() || null,
             resolution_photo_url: uploadedPhotoUrl,
             after_photo_url: uploadedPhotoUrl,
+            before_photo_url: beforePhotoUrl,
             verification_status: uploadedPhotoUrl ? "pending" : "not_required",
             updated_at: nowIso,
           })
@@ -271,6 +307,7 @@ export default function OfficerTicket() {
         status: "resolved",
         resolution_note: resolutionNote.trim() || null,
         resolution_photo_url: uploadedPhotoUrl,
+        after_photo_url: uploadedPhotoUrl,
       });
 
       if (uploadedPhotoUrl) {
@@ -376,7 +413,7 @@ export default function OfficerTicket() {
             )}
 
             {/* Before / After Photo Verification Section */}
-            {(beforePhotoUrl || issue.resolution_photo_url) && (
+            {(beforePhotoUrl || issue.resolution_photo_url || issue.after_photo_url) && (
               <div className="pt-4 border-t border-slate-200">
                 <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
                   <p className="font-semibold text-slate-800">
@@ -443,9 +480,9 @@ export default function OfficerTicket() {
                     <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
                       After (Officer Resolution)
                     </p>
-                    {issue.resolution_photo_url ? (
+                    {(issue.resolution_photo_url || issue.after_photo_url) ? (
                       <img
-                        src={issue.resolution_photo_url}
+                        src={issue.resolution_photo_url || issue.after_photo_url || ""}
                         alt="After repair"
                         className="w-full h-48 object-cover rounded-md border border-slate-200"
                       />

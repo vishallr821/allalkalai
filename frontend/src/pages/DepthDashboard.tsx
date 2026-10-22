@@ -208,7 +208,12 @@ export default function DepthDashboard() {
   const [fastForwarding, setFastForwarding] = useState(false);
 
   const reviewQueueIssues = issues.filter(
-    (i) => Boolean(i.after_photo_url) || i.verification_status === "needs_review" || i.verification_status === "flagged"
+    (i) =>
+      Boolean(i.after_photo_url) ||
+      Boolean(i.resolution_photo_url) ||
+      i.verification_status === "needs_review" ||
+      i.verification_status === "flagged" ||
+      (i.status === "resolved" && (Boolean(i.before_photo_url) || Boolean(i.resolution_photo_url)))
   );
 
   const handleApproveResolution = async (issueId: string) => {
@@ -738,9 +743,9 @@ export default function DepthDashboard() {
                       <div className="space-y-1">
                         <span className="text-[10px] font-bold text-slate-500 uppercase">Before Photo</span>
                         <div className="aspect-4/3 rounded-lg overflow-hidden bg-slate-200">
-                          {issue.before_photo_url ? (
+                          {issue.before_photo_url || issue.photo_url ? (
                             <img
-                              src={issue.before_photo_url}
+                              src={issue.before_photo_url || issue.photo_url || ""}
                               alt="Before"
                               className="w-full h-full object-cover"
                             />
@@ -755,9 +760,9 @@ export default function DepthDashboard() {
                       <div className="space-y-1">
                         <span className="text-[10px] font-bold text-emerald-700 uppercase">After Resolution</span>
                         <div className="aspect-4/3 rounded-lg overflow-hidden bg-slate-200">
-                          {issue.after_photo_url ? (
+                          {issue.after_photo_url || issue.resolution_photo_url ? (
                             <img
-                              src={issue.after_photo_url}
+                              src={issue.after_photo_url || issue.resolution_photo_url || ""}
                               alt="After"
                               className="w-full h-full object-cover"
                             />
@@ -886,6 +891,34 @@ export default function DepthDashboard() {
                           <p className="text-xs text-slate-500">
                             Due: {new Date(issue.deadline).toLocaleDateString()}
                           </p>
+                        )}
+                        {(issue.before_photo_url || issue.photo_url || issue.after_photo_url || issue.resolution_photo_url) && (
+                          <div className="flex gap-2 pt-1 pb-1">
+                            {(issue.before_photo_url || issue.photo_url) && (
+                              <div className="relative">
+                                <img
+                                  src={issue.before_photo_url || issue.photo_url || ""}
+                                  alt="Before"
+                                  className="w-10 h-10 rounded object-cover border border-slate-200"
+                                />
+                                <span className="absolute bottom-0 left-0 bg-slate-900/80 text-[7px] text-white px-1 rounded-tr">
+                                  Before
+                                </span>
+                              </div>
+                            )}
+                            {(issue.after_photo_url || issue.resolution_photo_url) && (
+                              <div className="relative">
+                                <img
+                                  src={issue.after_photo_url || issue.resolution_photo_url || ""}
+                                  alt="After"
+                                  className="w-10 h-10 rounded object-cover border border-emerald-300"
+                                />
+                                <span className="absolute bottom-0 left-0 bg-emerald-700 text-[7px] text-white px-1 rounded-tr">
+                                  After
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         )}
                         {issue.status === "escalated" && (
                           <div className="mt-2 pt-2 border-t border-red-200 text-xs text-red-700 bg-red-50 p-2.5 rounded space-y-1.5">

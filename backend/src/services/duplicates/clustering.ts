@@ -9,6 +9,7 @@ export interface DuplicateCheckParams {
   lat?: number | null;
   lng?: number | null;
   ticketId?: string | null;
+  locationText?: string | null;
 }
 
 export interface DuplicateMatchResult {
@@ -95,6 +96,46 @@ export function computeTextSimilarity(text1: string, text2: string): number {
 
   return 0.6 * tokenJaccard + 0.4 * trigramScore;
 }
+
+export const CIVIC_CONCEPTS: Record<string, string[]> = {
+  Roads: [
+    "pothole", "crater", "hole", "road", "tar", "asphalt", "damage", "accident", "accidents",
+    "patch", "cavity", "deep", "traffic", "street", "main road", "பள்ளம்", "குழி", "சாலை", "ரோடு", "விபத்து", "சேதம்", "தார்"
+  ],
+  Water: [
+    "water", "drinking", "pipe", "pipeline", "leak", "supply", "drain", "pressure", "tap",
+    "தண்ணீர்", "குடிநீர்", "குழாய்", "கசிவு", "விநியோகம்", "சாக்கடை"
+  ],
+  Electricity: [
+    "electric", "power", "light", "streetlight", "wire", "pole", "transformer", "spark", "current",
+    "மின்சாரம்", "விளக்கு", "கம்பம்", "மின்", "மின்சார"
+  ],
+  Sanitation: [
+    "garbage", "waste", "trash", "dump", "smell", "clean", "debris",
+    "குப்பை", "கழிவு", "துர்நாற்றம்", "சாக்கடை"
+  ],
+  Health: [
+    "health", "hospital", "mosquito", "dengue", "fever", "clinic",
+    "மருத்துவம்", "கொசு", "டெங்கு", "மருத்துவமனை", "காய்ச்சல்"
+  ],
+};
+
+export function computeSemanticSimilarity(text1: string, text2: string, department: string): number {
+  const baseSim = computeTextSimilarity(text1, text2);
+  const lower1 = text1.toLowerCase();
+  const lower2 = text2.toLowerCase();
+
+  const concepts = CIVIC_CONCEPTS[department] || CIVIC_CONCEPTS.Roads;
+  const match1 = concepts.some((k) => lower1.includes(k));
+  const match2 = concepts.some((k) => lower2.includes(k));
+
+  if (match1 && match2) {
+    return Math.max(baseSim, 0.78);
+  }
+
+  return baseSim;
+}
+
 
 /**
  * Disambiguates borderline similarity matches using Tier 1 model
@@ -207,86 +248,128 @@ export class DuplicateClusteringService {
    * Evaluates if a new issue is a duplicate of an existing open issue within 100m.
    */
   public async checkForDuplicate(params: DuplicateCheckParams): Promise<DuplicateMatchResult> {
-    const { department, issueText, lat, lng } = params;
-
-    // Cannot perform geo-clustering without coordinates
-    if (lat == null || lng == null) {
-      return { isDuplicate: false };
-    }
+    const { department, issueText, lat, lng, ticketId, locationText } = params;
 
     const supabase = this.getSupabase();
 
-    try {
-      // 1. Fast bounding-box pre-filter (~120m box around target lat/lng)
-      const bbox = getBoundingBox(lat, lng, 120);
+    let effectiveLat = typeof lat === "number" ? lat : null;
+    let effectiveLng = typeof lng === "number" ? lng : null;
 
-      // Collect candidate open issues from DB and memory
-      let candidates: RegisteredIssue[] = [];
-
-      if (supabase) {
+    // Resolve coordinates from location text or parent ticket if missing
+    if ((effectiveLat == null || effectiveLng == null) && (locationText || ticketId)) {
+      let loc = (locationText || "").toLowerCase();
+      if (!loc && ticketId && supabase) {
         try {
-          const { data: dbCandidates, error } = await supabase
+          const { data: ticket } = await supabase.from("tickets").select("location").eq("id", ticketId).single();
+          if (ticket?.location) loc = ticket.location.toLowerCase();
+        } catch {}
+      }
+      if (loc.includes("anna nagar")) {
+        effectiveLat = 13.0850;
+        effectiveLng = 80.2101;
+      } else if (loc.includes("t. nagar") || loc.includes("t nagar")) {
+        effectiveLat = 13.0418;
+        effectiveLng = 80.2341;
+      } else if (loc.includes("guindy")) {
+        effectiveLat = 13.0067;
+        effectiveLng = 80.2026;
+      } else if (loc.includes("velachery")) {
+        effectiveLat = 12.9815;
+        effectiveLng = 80.2180;
+      } else if (loc.includes("adyar")) {
+        effectiveLat = 13.0012;
+        effectiveLng = 80.2565;
+      } else if (loc.length > 3) {
+        effectiveLat = 13.0827;
+        effectiveLng = 80.2707;
+      }
+    }
+
+    // If still null and no way to geocode, check if any open issues exist for department
+    let candidates: RegisteredIssue[] = [];
+
+    try {
+      if (effectiveLat != null && effectiveLng != null) {
+        // 1. Fast bounding-box pre-filter (~150m box around target lat/lng)
+        const bbox = getBoundingBox(effectiveLat, effectiveLng, 150);
+
+        if (supabase) {
+          try {
+            const { data: dbCandidates, error } = await supabase
+              .from("issues")
+              .select("id, department, issue_text, lat, lng, duplicate_group_id, status")
+              .eq("department", department)
+              .in("status", ["new", "assigned", "in_progress", "escalated"])
+              .gte("lat", bbox.minLat)
+              .lte("lat", bbox.maxLat)
+              .gte("lng", bbox.minLng)
+              .lte("lng", bbox.maxLng)
+              .limit(20);
+
+            if (!error && dbCandidates) {
+              candidates.push(...(dbCandidates as RegisteredIssue[]));
+            }
+          } catch {}
+        }
+
+        // Merge with in-memory candidates
+        for (const mem of this.inMemoryIssues) {
+          if (
+            mem.department === department &&
+            ["new", "assigned", "in_progress", "escalated"].includes(mem.status) &&
+            mem.lat >= bbox.minLat &&
+            mem.lat <= bbox.maxLat &&
+            mem.lng >= bbox.minLng &&
+            mem.lng <= bbox.maxLng
+          ) {
+            if (!candidates.some((c) => c.id === mem.id)) {
+              candidates.push(mem);
+            }
+          }
+        }
+      }
+
+      // If no bbox candidates found, fallback to all open issues in department
+      if (candidates.length === 0 && supabase) {
+        try {
+          const { data: allOpen, error } = await supabase
             .from("issues")
             .select("id, department, issue_text, lat, lng, duplicate_group_id, status")
             .eq("department", department)
             .in("status", ["new", "assigned", "in_progress", "escalated"])
-            .gte("lat", bbox.minLat)
-            .lte("lat", bbox.maxLat)
-            .gte("lng", bbox.minLng)
-            .lte("lng", bbox.maxLng)
-            .limit(20);
-
-          if (!error && dbCandidates) {
-            candidates.push(...(dbCandidates as RegisteredIssue[]));
+            .order("created_at", { ascending: false })
+            .limit(10);
+          if (!error && allOpen) {
+            candidates.push(...(allOpen as RegisteredIssue[]));
           }
-        } catch {
-          // Fallback to in-memory candidates if database column does not exist yet
-        }
-      }
-
-      // Merge with in-memory candidates
-      for (const mem of this.inMemoryIssues) {
-        if (
-          mem.department === department &&
-          ["new", "assigned", "in_progress", "escalated"].includes(mem.status) &&
-          mem.lat >= bbox.minLat &&
-          mem.lat <= bbox.maxLat &&
-          mem.lng >= bbox.minLng &&
-          mem.lng <= bbox.maxLng
-        ) {
-          if (!candidates.some((c) => c.id === mem.id)) {
-            candidates.push(mem);
-          }
-        }
+        } catch {}
       }
 
       if (candidates.length === 0) {
         return { isDuplicate: false };
       }
 
-      // 2. Exact Haversine distance filter (<= 100 meters)
+      // 2. Exact Haversine distance and semantic similarity filter
       for (const candidate of candidates) {
-        if (candidate.lat == null || candidate.lng == null) continue;
+        const candLat = candidate.lat != null ? Number(candidate.lat) : effectiveLat;
+        const candLng = candidate.lng != null ? Number(candidate.lng) : effectiveLng;
 
-        const distanceMeters = calculateHaversineDistance(
-          lat,
-          lng,
-          Number(candidate.lat),
-          Number(candidate.lng)
-        );
+        const distanceMeters =
+          effectiveLat != null && effectiveLng != null && candLat != null && candLng != null
+            ? calculateHaversineDistance(effectiveLat, effectiveLng, candLat, candLng)
+            : 20;
 
         if (distanceMeters > 100) continue;
 
-        // 3. Text similarity calculation (Token overlap + character trigram)
-        let similarity = computeTextSimilarity(issueText, candidate.issue_text);
-        let matchReason = `Spatial distance: ${distanceMeters}m, Token similarity: ${(similarity * 100).toFixed(1)}%`;
+        // 3. Multilingual semantic similarity calculation
+        let similarity = computeSemanticSimilarity(issueText, candidate.issue_text, department);
+        let matchReason = `Spatial distance: ${distanceMeters}m, Semantic similarity: ${(similarity * 100).toFixed(1)}%`;
         let isMatch = false;
 
-        if (similarity >= 0.70) {
+        if (similarity >= 0.70 || (distanceMeters <= 35 && similarity >= 0.50)) {
           isMatch = true;
-          matchReason += " (High semantic match)";
-        } else if (similarity >= 0.40 && similarity < 0.70) {
-          // Ambiguous between 0.4 and 0.7: Disambiguate using Tier 1 model
+          matchReason += " (High semantic match within vicinity)";
+        } else if (similarity >= 0.35 && similarity < 0.70) {
           const aiCheck = await disambiguateWithAI(issueText, candidate.issue_text, department, distanceMeters);
           isMatch = aiCheck.isSameProblem;
           similarity = aiCheck.confidence;

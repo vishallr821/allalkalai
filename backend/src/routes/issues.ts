@@ -22,7 +22,7 @@ function getSupabaseClient() {
 issuesRouter.post("/api/create-issue", async (req: Request, res: Response, next: NextFunction) => {
   const startTime = Date.now();
   try {
-    const { parentTicketId, department, issueText, deadline, priority, lat, lng } = req.body;
+    const { parentTicketId, department, issueText, deadline, priority, lat, lng, beforePhotoUrl, photoUrl, location } = req.body;
 
     if (!parentTicketId || !department || !issueText) {
       return res.status(400).json({ error: "parentTicketId, department, and issueText are required" });
@@ -30,17 +30,50 @@ issuesRouter.post("/api/create-issue", async (req: Request, res: Response, next:
 
     const supabase = getSupabaseClient();
 
-    // 1. Check for duplicates in the same department within 100m
+    // 0. Retrieve parent ticket photo & location if not provided
+    let beforePhoto = beforePhotoUrl || photoUrl || null;
+    let locationText = location || null;
+    try {
+      const { data: parentTicket } = await supabase
+        .from("tickets")
+        .select("photo_url, location")
+        .eq("id", parentTicketId)
+        .single();
+      if (!beforePhoto && parentTicket?.photo_url) {
+        beforePhoto = parentTicket.photo_url;
+      }
+      if (!locationText && parentTicket?.location) {
+        locationText = parentTicket.location;
+      }
+    } catch {}
+
+    // 1. Check for duplicates in the same department within vicinity
     const duplicateCheck = await duplicateClustering.checkForDuplicate({
       department: department as ValidDepartment,
       issueText,
       lat: typeof lat === "number" ? lat : null,
       lng: typeof lng === "number" ? lng : null,
       ticketId: parentTicketId,
+      locationText,
     });
 
-    // 2. Insert new issue into Supabase (with fallback if phase 1 columns not yet migrated)
+    // If duplicate found, prioritize canonical issue response
+    if (duplicateCheck.isDuplicate && duplicateCheck.canonicalIssueId) {
+      try {
+        await supabase
+          .from("issues")
+          .update({
+            priority: "high",
+            duplicate_group_id: duplicateCheck.duplicateGroupId || null,
+          })
+          .eq("id", duplicateCheck.canonicalIssueId);
+      } catch {}
+    }
+
+    // 2. Insert new issue into Supabase
+    // If it's a duplicate, do not assign officer to avoid creating redundant field tasks
     let issueId = crypto.randomUUID();
+    const issueStatus = duplicateCheck.isDuplicate ? "assigned" : "new";
     try {
       const { data: issueData, error: issueErr } = await supabase
         .from("issues")
@@ -49,12 +82,14 @@ issuesRouter.post("/api/create-issue", async (req: Request, res: Response, next:
           department,
           issue_text: issueText,
           deadline: deadline || null,
-          priority: priority || "medium",
+          priority: duplicateCheck.isDuplicate ? "high" : (priority || "medium"),
           lat: typeof lat === "number" ? lat : null,
           lng: typeof lng === "number" ? lng : null,
           duplicate_group_id: duplicateCheck.duplicateGroupId || null,
-          status: "new",
+          status: issueStatus,
+          before_photo_url: beforePhoto,
           verification_status: "not_required",
+          assigned_officer_id: null, // Avoid redundant field task for duplicate
         })
         .select("id")
         .single();
@@ -147,7 +182,7 @@ issuesRouter.post("/api/mark-resolved", async (req: Request, res: Response, next
     // 1. Fetch issue details to retrieve before photo if available
     const { data: currentIssue } = await supabase
       .from("issues")
-      .select("id, department, before_photo_url, parent_ticket_id")
+      .select("id, department, before_photo_url, parent_ticket_id, duplicate_group_id")
       .eq("id", issueId)
       .single();
 
@@ -162,17 +197,19 @@ issuesRouter.post("/api/mark-resolved", async (req: Request, res: Response, next
     }
 
     // 2. Set status to resolved and verification_status to pending immediately
+    const updatePayload = {
+      status: "resolved",
+      resolution_note: resolutionNote || null,
+      resolution_photo_url: photoUrl || null,
+      after_photo_url: photoUrl || null,
+      before_photo_url: beforePhoto,
+      verification_status: photoUrl ? "pending" : "not_required",
+      updated_at: now,
+    };
+
     const { error: updateError } = await supabase
       .from("issues")
-      .update({
-        status: "resolved",
-        resolution_note: resolutionNote || null,
-        resolution_photo_url: photoUrl || null,
-        after_photo_url: photoUrl || null,
-        before_photo_url: beforePhoto,
-        verification_status: photoUrl ? "pending" : "not_required",
-        updated_at: now,
-      })
+      .update(updatePayload)
       .eq("id", issueId);
 
     if (updateError) {
@@ -185,6 +222,25 @@ issuesRouter.post("/api/mark-resolved", async (req: Request, res: Response, next
           updated_at: now,
         })
         .eq("id", issueId);
+    }
+
+    // Cascade resolution to clustered duplicate issues so all reporting citizens receive updates
+    if (currentIssue?.duplicate_group_id) {
+      try {
+        await supabase
+          .from("issues")
+          .update({
+            status: "resolved",
+            resolution_note: resolutionNote || null,
+            resolution_photo_url: photoUrl || null,
+            after_photo_url: photoUrl || null,
+            verification_status: photoUrl ? "verified" : "not_required",
+            updated_at: now,
+          })
+          .eq("duplicate_group_id", currentIssue.duplicate_group_id);
+      } catch (cascadeErr) {
+        console.warn("[CASCADE_RESOLVED] Error resolving duplicates:", cascadeErr);
+      }
     }
 
     await recordAuditLog({

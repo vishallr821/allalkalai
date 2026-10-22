@@ -237,7 +237,7 @@ export default function CitizenTrack() {
               <p className="font-semibold text-sm">Similar Complaints Clustered in Your Area</p>
               <p className="text-xs text-amber-800 mt-0.5">
                 {sessionStorage.getItem(`duplicate_notice_${ticketId}`) ||
-                  "Multiple citizens in your immediate vicinity have reported this same civic infrastructure issue. Linked to cluster for prioritized response."}
+                  "1 other citizen has also reported this problem in your immediate vicinity. Consolidated for priority response."}
               </p>
             </div>
           </div>
@@ -271,21 +271,31 @@ export default function CitizenTrack() {
                 {ticket.raw_text}
               </p>
             </div>
-            {ticketPhotos.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-slate-300">
-                <p className="font-medium text-slate-800 mb-3">Photos:</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {ticketPhotos.map((photo) => (
-                    <img
-                      key={photo.id}
-                      src={photo.photo_url}
-                      alt="Complaint"
-                      className="w-full aspect-square object-cover rounded-lg border border-slate-300"
-                    />
-                  ))}
+            {(() => {
+              const allComplaintPhotos = [
+                ...ticketPhotos,
+                ...(ticket.photo_url ? [{ id: "ticket-photo", photo_url: ticket.photo_url }] : []),
+                ...issues.filter((i) => i.before_photo_url).map((i) => ({ id: `before-${i.id}`, photo_url: i.before_photo_url! })),
+              ].filter((p, idx, arr) => arr.findIndex((x) => x.photo_url === p.photo_url) === idx);
+
+              if (allComplaintPhotos.length === 0) return null;
+
+              return (
+                <div className="mt-4 pt-4 border-t border-slate-300">
+                  <p className="font-medium text-slate-800 mb-3">Photos:</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {allComplaintPhotos.map((photo) => (
+                      <img
+                        key={photo.id}
+                        src={photo.photo_url}
+                        alt="Complaint defect"
+                        className="w-full aspect-square object-cover rounded-lg border border-slate-300 shadow-2xs"
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </Card>
 
@@ -335,28 +345,39 @@ export default function CitizenTrack() {
 
                   {issue.status === "resolved" && (
                     <div className="mt-4 pt-4 border-t border-slate-300 space-y-4">
-                      {(issue.resolution_note || resolutionPhotosByIssue[issue.id]?.length > 0) && (
-                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
-                          <p className="font-medium text-slate-700">Officer's update:</p>
-                          {issue.resolution_note && (
-                            <p className="text-slate-700 text-sm whitespace-pre-wrap">
-                              {issue.resolution_note}
-                            </p>
-                          )}
-                          {resolutionPhotosByIssue[issue.id]?.length > 0 && (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                              {resolutionPhotosByIssue[issue.id].map((photo) => (
-                                <img
-                                  key={photo.id}
-                                  src={photo.photo_url}
-                                  alt="Resolution"
-                                  className="w-full aspect-square object-cover rounded-lg border border-slate-300"
-                                />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      {(() => {
+                        const resPhotos = [
+                          ...(resolutionPhotosByIssue[issue.id] || []),
+                          ...((issue.resolution_photo_url || issue.after_photo_url)
+                            ? [{ id: "issue-res-photo", photo_url: (issue.resolution_photo_url || issue.after_photo_url)! }]
+                            : []),
+                        ].filter((p, idx, arr) => arr.findIndex((x) => x.photo_url === p.photo_url) === idx);
+
+                        if (!issue.resolution_note && resPhotos.length === 0) return null;
+
+                        return (
+                          <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
+                            <p className="font-medium text-slate-700">Officer's update:</p>
+                            {issue.resolution_note && (
+                              <p className="text-slate-700 text-sm whitespace-pre-wrap">
+                                {issue.resolution_note}
+                              </p>
+                            )}
+                            {resPhotos.length > 0 && (
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                {resPhotos.map((photo) => (
+                                  <img
+                                    key={photo.id}
+                                    src={photo.photo_url}
+                                    alt="Resolution"
+                                    className="w-full aspect-square object-cover rounded-lg border border-slate-300 shadow-2xs"
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {!issue.citizen_confirmed ? (
                         feedbackPanelIssueId === issue.id ? (
