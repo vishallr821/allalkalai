@@ -11,6 +11,7 @@ import {
   Button,
 } from "../components/ui";
 import { ArrowLeft, Award } from "lucide-react";
+import { API_BASE_URL } from "../config";
 
 const DEPARTMENTS = [
   "Water",
@@ -54,24 +55,67 @@ export default function Login() {
           throw new Error("Please select a department");
         }
 
-        const { data, error: signUpError } = await supabase.auth.signUp({
+        let registeredViaApi = false;
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password, name, role, department }),
+          });
+
+          if (res.ok) {
+            registeredViaApi = true;
+          } else {
+            const errJson = await res.json().catch(() => ({}));
+            if (errJson.error) throw new Error(errJson.error);
+          }
+        } catch (apiErr: any) {
+          // If network failed, fall back to direct Supabase signup below
+          if (apiErr.message && !apiErr.message.includes("Failed to fetch") && !apiErr.message.includes("NetworkError")) {
+            throw apiErr;
+          }
+        }
+
+        if (!registeredViaApi) {
+          const { data, error: signUpError } = await supabase.auth.signUp({
+            email,
+            password,
+          });
+
+          if (signUpError) {
+            if (signUpError.message?.toLowerCase().includes("rate limit")) {
+              throw new Error("Supabase email rate limit exceeded. Please ensure your backend server is running on port 4000.");
+            }
+            throw signUpError;
+          }
+          if (!data.user) throw new Error("Failed to create user");
+
+          const { error: profileError } = await supabase
+            .from("profiles")
+            .insert({
+              id: data.user.id,
+              name,
+              role,
+              department: role === "dept_head" || role === "officer" ? department : null,
+            });
+
+          if (profileError) throw profileError;
+        }
+
+        // Auto-login immediately after creation
+        const { error: loginError } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
-        if (signUpError) throw signUpError;
-        if (!data.user) throw new Error("Failed to create user");
-
-        const { error: profileError } = await supabase
-          .from("profiles")
-          .insert({
-            id: data.user.id,
-            name,
-            role,
-            department: role === "dept_head" || role === "officer" ? department : null,
-          });
-
-        if (profileError) throw profileError;
+        if (!loginError) {
+          if (role === "citizen") navigate("/citizen/tickets");
+          else if (role === "dept_head") navigate("/depthead/dashboard");
+          else if (role === "officer") navigate("/officer/dashboard");
+          else if (role === "official") navigate("/official/issue-order");
+          else navigate("/citizen/tickets");
+          return;
+        }
 
         setEmail("");
         setPassword("");
@@ -80,7 +124,7 @@ export default function Login() {
         setDepartment("");
         setIsSignUp(false);
         setError("");
-        setSuccess("Signup successful! Please log in with your credentials.");
+        setSuccess("Account created successfully! Please sign in with your credentials.");
       } else {
         const { error: loginError } = await supabase.auth.signInWithPassword({
           email,

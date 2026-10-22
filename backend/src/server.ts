@@ -10,6 +10,7 @@ import { ticketsRouter } from "./routes/tickets";
 import { geocodeRouter } from "./routes/geocode";
 import { adminRouter } from "./routes/admin";
 import { publicRouter } from "./routes/public";
+import { authRouter } from "./routes/auth";
 import { startSLARunner } from "./jobs/slaRunner";
 import { prewarmServices } from "./services/prewarm";
 
@@ -28,6 +29,7 @@ export function createApp(): Express {
   app.use(geocodeRouter);
   app.use(adminRouter);
   app.use(publicRouter);
+  app.use(authRouter);
 
   // Global Error Handler
   app.use(globalErrorHandler);
