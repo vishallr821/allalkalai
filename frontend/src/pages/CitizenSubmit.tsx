@@ -18,7 +18,7 @@ import TopNav from "../components/TopNav";
 
 export default function CitizenSubmit() {
   usePageTitle("File a Complaint");
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const navigate = useNavigate();
   const [text, setText] = useState("");
   const [location, setLocation] = useState("");
@@ -50,7 +50,11 @@ export default function CitizenSubmit() {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognition) return;
+    if (!SpeechRecognition) {
+      setVoiceError(lang === "ta" ? "உங்கள் உலாவியில் குரல் உள்ளீடு ஆதரிக்கப்படவில்லை" : "Voice input is not supported in this browser");
+      setTimeout(() => setVoiceError(""), 4000);
+      return;
+    }
 
     if (voiceListening) {
       if (voiceRecognitionRef.current) {
@@ -61,6 +65,7 @@ export default function CitizenSubmit() {
     }
 
     const recognition = new SpeechRecognition();
+    recognition.lang = lang === "ta" ? "ta-IN" : "en-IN";
     recognition.interimResults = true;
     recognition.continuous = false;
 
@@ -83,14 +88,15 @@ export default function CitizenSubmit() {
 
     recognition.onerror = (event: any) => {
       let message = "Voice input error";
-      if (event.error === "permission-denied") {
-        message = "Microphone permission denied — you can type instead";
+      if (event.error === "permission-denied" || event.error === "not-allowed") {
+        message = "Microphone permission needed — you can type instead";
       } else if (event.error === "no-speech") {
-        message = "No speech detected — try again or type instead";
+        message = "No speech detected — try speaking closer to microphone";
       } else if (event.error === "network") {
-        message = "Network error — please try again";
+        message = "Network speech service unavailable — you can type instead";
       }
       setVoiceError(message);
+      setTimeout(() => setVoiceError(""), 4000);
     };
 
     recognition.onend = () => {
@@ -98,7 +104,11 @@ export default function CitizenSubmit() {
     };
 
     voiceRecognitionRef.current = recognition;
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      setVoiceListening(false);
+    }
   };
 
   const handleUseCurrentLocation = async () => {
@@ -107,13 +117,14 @@ export default function CitizenSubmit() {
 
     try {
       if (!navigator.geolocation) {
-        throw new Error("Geolocation is not supported by your browser");
+        throw new Error("Geolocation is not supported by your device");
       }
 
       const position = await new Promise<GeolocationPosition>(
         (resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
             timeout: 10000,
+            enableHighAccuracy: true,
           });
         }
       );
@@ -121,21 +132,46 @@ export default function CitizenSubmit() {
       const { latitude, longitude } = position.coords;
       setCoords({ lat: latitude, lng: longitude });
 
-      const response = await fetch(`${API_BASE_URL}/api/reverse-geocode`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lat: latitude, lon: longitude }),
-      });
+      let resolvedAddress = "";
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          errorData.error || `Failed to get address: ${response.statusText}`
-        );
+      // 1. Try local/host backend reverse geocode
+      try {
+        const controller = new AbortController();
+        const tId = setTimeout(() => controller.abort(), 2500);
+        const response = await fetch(`${API_BASE_URL}/api/reverse-geocode`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lat: latitude, lon: longitude }),
+          signal: controller.signal,
+        });
+        clearTimeout(tId);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.address) resolvedAddress = data.address;
+        }
+      } catch {
+        // Backend lookup failed
       }
 
-      const data = await response.json();
-      setLocation(data.address);
+      // 2. Try client-side Nominatim lookup if backend was unreachable
+      if (!resolvedAddress) {
+        try {
+          const osmRes = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+          );
+          if (osmRes.ok) {
+            const osmData = await osmRes.json();
+            if (osmData.display_name) {
+              resolvedAddress = osmData.display_name.split(",").slice(0, 3).join(",");
+            }
+          }
+        } catch {
+          // Offline
+        }
+      }
+
+      // 3. If geocoding failed or offline, seamlessly use GPS coordinates without showing error
+      setLocation(resolvedAddress || `GPS: ${latitude.toFixed(5)}°N, ${longitude.toFixed(5)}°E`);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Couldn't get your location";
@@ -165,86 +201,113 @@ export default function CitizenSubmit() {
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const submitResponse = await fetch(`${API_BASE_URL}/api/submit-complaint`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-          rawText: text,
-          photoUrl: null,
-          location,
-        }),
-      });
+      let ticketId: string | null = null;
 
-      if (!submitResponse.ok) {
-        const errorData = await submitResponse.json();
-        throw new Error(
-          errorData.error || `Backend error: ${submitResponse.statusText}`
-        );
-      }
+      // Attempt submission via Backend AI Pipeline first
+      try {
+        const controller = new AbortController();
+        const tId = setTimeout(() => controller.abort(), 4000);
 
-      const submitData = await submitResponse.json();
-      const ticketId = submitData.ticketId;
+        const submitResponse = await fetch(`${API_BASE_URL}/api/submit-complaint`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: user.id,
+            rawText: text,
+            photoUrl: null,
+            location,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(tId);
 
-      const analysisResponse = await fetch(`${API_BASE_URL}/api/analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
+        if (submitResponse.ok) {
+          const submitData = await submitResponse.json();
+          ticketId = submitData.ticketId;
 
-      if (!analysisResponse.ok) {
-        const errorData = await analysisResponse.json();
-        throw new Error(
-          errorData.error || `Backend error: ${analysisResponse.statusText}`
-        );
-      }
-
-      const analysisData = await analysisResponse.json();
-
-      if (
-        !analysisData ||
-        !analysisData.issues ||
-        !Array.isArray(analysisData.issues)
-      ) {
-        throw new Error(
-          "Invalid response from analysis: " + JSON.stringify(analysisData)
-        );
-      }
-
-      console.log("[PIPELINE_STEP_1] Groq analysis response:", JSON.stringify(analysisData, null, 2));
-
-      const issueResults = await Promise.all(
-        analysisData.issues.map(async (issue: any) => {
-          const createRes = await fetch(`${API_BASE_URL}/api/create-issue`, {
+          // Run AI Analysis
+          const analysisResponse = await fetch(`${API_BASE_URL}/api/analyze`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              parentTicketId: ticketId,
-              department: issue.department,
-              issueText: issue.issue_text,
-              deadline: issue.deadline,
-              priority: issue.priority,
-              lat: coords?.lat ?? null,
-              lng: coords?.lng ?? null,
-            }),
+            body: JSON.stringify({ text }),
           });
 
-          if (!createRes.ok) {
-            const errData = await createRes.json();
-            throw new Error(errData.error || "Failed to create issue via backend");
+          if (analysisResponse.ok) {
+            const analysisData = await analysisResponse.json();
+            if (analysisData?.issues && Array.isArray(analysisData.issues)) {
+              const issueResults = await Promise.all(
+                analysisData.issues.map(async (issue: any) => {
+                  const createRes = await fetch(`${API_BASE_URL}/api/create-issue`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      parentTicketId: ticketId,
+                      department: issue.department,
+                      issueText: issue.issue_text,
+                      deadline: issue.deadline,
+                      priority: issue.priority,
+                      lat: coords?.lat ?? null,
+                      lng: coords?.lng ?? null,
+                    }),
+                  });
+                  return createRes.ok ? createRes.json() : null;
+                })
+              );
+
+              const duplicates = issueResults.filter((r) => r?.isDuplicate);
+              if (duplicates.length > 0) {
+                const count = duplicates[0].affectedCitizensCount || 2;
+                sessionStorage.setItem(
+                  `duplicate_notice_${ticketId}`,
+                  `${count - 1} other citizen(s) have also reported this problem in your immediate vicinity.`
+                );
+              }
+            }
           }
+        }
+      } catch {
+        // Backend pipeline unreachable from phone
+      }
 
-          return createRes.json();
-        })
-      );
+      // Direct Supabase Fallback if backend API call was unreachable
+      if (!ticketId) {
+        setLoadingMessage("Connecting directly to civic cloud...");
+        const { data: directTicket, error: directErr } = await supabase
+          .from("tickets")
+          .insert({
+            citizen_id: user.id,
+            raw_text: text,
+            location,
+          })
+          .select("id")
+          .single();
 
-      const duplicates = issueResults.filter((r) => r.isDuplicate);
-      if (duplicates.length > 0) {
-        const count = duplicates[0].affectedCitizensCount || 2;
-        sessionStorage.setItem(
-          `duplicate_notice_${ticketId}`,
-          `${count - 1} other citizen(s) have also reported this problem in your immediate vicinity.`
-        );
+        if (directErr || !directTicket) {
+          throw new Error(directErr?.message || "Failed to save complaint to database");
+        }
+
+        ticketId = directTicket.id;
+
+        // Intelligent client-side department classification
+        const lower = text.toLowerCase();
+        let dept = "Roads";
+        let prio = "medium";
+        if (/water|தண்ணீர்|குடிநீர்|drain|pipe|sewage|leak/i.test(lower)) dept = "Water";
+        else if (/light|current|மின்சாரம்|power|wire|transformer|volt/i.test(lower)) dept = "Electricity";
+        else if (/garbage|waste|சாக்கடை|குப்பை|clean/i.test(lower)) dept = "Sanitation";
+        else if (/health|மருத்துவம்|hospital|dengue|mosquito/i.test(lower)) dept = "Health";
+
+        await supabase.from("issues").insert({
+          parent_ticket_id: ticketId,
+          department: dept,
+          issue_text: text,
+          priority: prio,
+          status: "assigned",
+          lat: coords?.lat ?? null,
+          lng: coords?.lng ?? null,
+          deadline: new Date(Date.now() + 48 * 3600 * 1000).toISOString().split("T")[0],
+          sla_deadline: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+        });
       }
 
       if (photos.length > 0) {

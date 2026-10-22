@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { X, Camera, Upload } from "lucide-react";
 import { Button } from "./ui";
 
@@ -12,91 +12,8 @@ export default function PhotoCapture({
   onChange,
 }: PhotoCaptureProps) {
   const [photos, setPhotos] = useState<File[]>([]);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState("");
-  const [cameraLoading, setCameraLoading] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
-    };
-  }, []);
-
-  const startCamera = async () => {
-    setCameraError("");
-    setCameraLoading(true);
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
-      console.log("[PhotoCapture] Camera stream started:", stream.getTracks().length, "tracks");
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch((err) => {
-          console.error("[PhotoCapture] Video play() failed:", err);
-        });
-        console.log("[PhotoCapture] Video play() called");
-      }
-      setCameraActive(true);
-    } catch (err) {
-      let message = "Camera not available";
-      if (err instanceof DOMException) {
-        if (err.name === "NotAllowedError") {
-          message = "Camera permission denied — use gallery instead";
-        } else if (err.name === "NotFoundError") {
-          message = "No camera found on this device";
-        } else if (err.name === "NotSupportedError") {
-          message = "Camera not supported — use gallery instead";
-        }
-      }
-      setCameraError(message);
-    } finally {
-      setCameraLoading(false);
-    }
-  };
-
-  const capturePhoto = async () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-
-    if (!ctx) return;
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
-
-    canvas.toBlob((blob) => {
-      if (blob) {
-        const file = new File([blob], `photo-${Date.now()}.jpg`, {
-          type: "image/jpeg",
-        });
-        const newPhotos = [...photos, file];
-        setPhotos(newPhotos);
-        onChange(newPhotos);
-      }
-      stopCamera();
-    }, "image/jpeg");
-  };
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      console.log("[PhotoCapture] Stopping camera stream:", streamRef.current.getTracks().length, "tracks");
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    setCameraActive(false);
-  };
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -109,9 +26,8 @@ export default function PhotoCapture({
     setPhotos(newPhotos);
     onChange(newPhotos);
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    // Reset input so user can pick another file if desired
+    e.target.value = "";
   };
 
   const removePhoto = (index: number) => {
@@ -124,115 +40,91 @@ export default function PhotoCapture({
 
   return (
     <div className="space-y-4">
-      {cameraError && (
-        <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">
-          {cameraError}
-        </p>
-      )}
-
       <div className="flex gap-2 flex-wrap">
+        {/* Native Camera Trigger */}
         <Button
           variant="secondary"
           type="button"
-          onClick={startCamera}
-          disabled={cameraLoading || isFull}
-          className="text-sm px-3 py-1"
+          onClick={() => cameraInputRef.current?.click()}
+          disabled={isFull}
+          className="text-sm px-3.5 py-2 flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg active:scale-95 transition-all"
         >
-          <Camera className="w-4 h-4 inline mr-1" />
-          {cameraLoading ? "Starting..." : "Take Photo"}
+          <Camera className="w-4 h-4 text-emerald-600" />
+          <span>Take Photo</span>
         </Button>
 
+        {/* Gallery Picker Trigger */}
         <Button
           variant="secondary"
           type="button"
           disabled={isFull}
-          onClick={() => fileInputRef.current?.click()}
-          className="text-sm px-3 py-1"
+          onClick={() => galleryInputRef.current?.click()}
+          className="text-sm px-3.5 py-2 flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg active:scale-95 transition-all"
         >
-          <Upload className="w-4 h-4 inline mr-1" />
-          Choose from Gallery
+          <Upload className="w-4 h-4 text-blue-600" />
+          <span>Choose from Gallery</span>
         </Button>
 
+        {/* Hidden Native Camera Input - capture="environment" launches real mobile camera */}
         <input
-          ref={fileInputRef}
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileSelect}
+          className="hidden"
+          aria-label="Camera Input"
+        />
+
+        {/* Hidden Gallery Input */}
+        <input
+          ref={galleryInputRef}
           type="file"
           accept="image/*"
           multiple
           onChange={handleFileSelect}
           className="hidden"
+          aria-label="Gallery Input"
         />
       </div>
 
       {isFull && (
-        <p className="text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-lg">
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg">
           Maximum {maxPhotos} photos reached
         </p>
       )}
 
+      {/* Thumbnails Preview */}
       {photos.length > 0 && (
         <div className="space-y-2">
-          <p className="text-sm font-medium text-slate-700">
-            Photos ({photos.length}/{maxPhotos})
+          <p className="text-xs font-semibold text-slate-600">
+            Attached Photos ({photos.length}/{maxPhotos})
           </p>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
             {photos.map((photo, index) => (
               <div
                 key={index}
-                className="relative aspect-square bg-slate-100 rounded-lg overflow-hidden group"
+                className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200 shadow-xs group"
               >
                 <img
                   src={URL.createObjectURL(photo)}
-                  alt={`Captured ${index}`}
+                  alt={`Attached grievance photo ${index + 1}`}
                   className="w-full h-full object-cover"
                 />
                 <button
                   type="button"
                   onClick={() => removePhoto(index)}
-                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute top-1.5 right-1.5 bg-red-600 hover:bg-red-700 text-white rounded-full p-1 shadow-md transition-transform active:scale-90"
                   title="Remove photo"
+                  aria-label="Remove photo"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             ))}
           </div>
         </div>
       )}
-
-      {cameraActive && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg overflow-hidden max-w-lg w-full mx-4 space-y-4 p-4">
-            <h3 className="font-semibold text-slate-800">Take a Photo</h3>
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-64 bg-black rounded-lg"
-            />
-            <div className="flex gap-2 justify-center">
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={stopCamera}
-                className="text-sm"
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                type="button"
-                onClick={capturePhoto}
-                className="text-sm"
-              >
-                Capture
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <canvas ref={canvasRef} className="hidden" />
     </div>
   );
 }
