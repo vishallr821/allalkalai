@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AllalKalai</string>
+    <string name="title_activity_main">AllalKalai</string>
+    <string name="package_name">com.allalkalai.app</string>
+    <string name="custom_url_scheme">com.allalkalai.app</string>
+</resources>
