@@ -8,6 +8,7 @@
     "build": "tsc",
     "seed": "npm run build && node dist/seed-demo.js",
     "seed:demo": "npm run build && node dist/seed-demo.js",
+    "clean:db": "npm run build && node dist/clean-db.js",
     "smoke": "npm run build && node dist/test-smoke.js",
     "test:drills": "npm run build && node dist/test-failure-drills.js",
     "test:load": "npm run build && node dist/test-concurrency.js",
