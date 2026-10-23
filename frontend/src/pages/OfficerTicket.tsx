@@ -16,6 +16,7 @@ import DepartmentBadge from "../components/ui/DepartmentBadge";
 import PhotoCapture from "../components/PhotoCapture";
 import { DEPT_COLORS, getRemainingTime, getSLAProgressColor, isOverdue } from "../lib/utils";
 import { compressImage } from "../lib/imageCompression";
+import { verifyResolutionPhotoClient } from "../services/photoVerification";
 
 export default function OfficerTicket() {
   usePageTitle("Issue Details");
@@ -104,6 +105,13 @@ export default function OfficerTicket() {
         setBeforePhotoUrl(beforeUrl || null);
 
         // Fetch verification state
+        if (data.verification_status) {
+          setVerificationData({
+            status: data.verification_status,
+            score: data.verification_score,
+            reason: data.verification_flag_reason,
+          });
+        }
         await fetchVerificationStatus(data.id);
       } catch (err) {
         setError(err instanceof Error ? err.message : "An error occurred");
@@ -314,12 +322,43 @@ export default function OfficerTicket() {
         setVerificationData({
           status: "pending",
           score: undefined,
-          reason: "AI photo verification is running in the background...",
+          reason: "AI vision verification evaluating submitted proof...",
         });
+
+        // Trigger immediate AI multimodal inspection
+        try {
+          const vResult = await verifyResolutionPhotoClient({
+            issueId: issue.id,
+            beforePhotoUrl: beforePhotoUrl || issue.before_photo_url,
+            afterPhotoUrl: uploadedPhotoUrl,
+            department: issue.department,
+            issueText: issue.issue_text,
+          });
+
+          setVerificationData({
+            status: vResult.status,
+            score: vResult.score,
+            reason: vResult.reason,
+          });
+
+          setIssue((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  verification_status: vResult.status,
+                  verification_score: vResult.score,
+                  verification_flag_reason: vResult.reason,
+                }
+              : prev
+          );
+        } catch (verifyErr) {
+          console.warn("[OFFICER_TICKET] Auto-verification error:", verifyErr);
+        }
       }
 
       setResolutionPhotos([]);
       setResolutionNote("");
+
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
@@ -532,6 +571,25 @@ export default function OfficerTicket() {
               {issue.escalation_reason && (
                 <div className="text-xs text-red-900 bg-red-100/70 p-2.5 rounded border border-red-200">
                   <span className="font-bold">Breach Reason:</span> {issue.escalation_reason}
+                </div>
+              )}
+            </div>
+          )}
+
+          {issue.status === "in_progress" && issue.verification_status === "flagged" && (
+            <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 space-y-2 mb-6">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">❌</span>
+                <p className="text-red-900 font-bold text-base">
+                  Resolution Rejected by Department Head — Re-work Required
+                </p>
+              </div>
+              <p className="text-sm text-red-800">
+                The supervisor reviewed the submitted proof and marked this ticket for on-site re-work. Please inspect the site, complete the physical repairs, and upload fresh photo evidence.
+              </p>
+              {issue.verification_flag_reason && (
+                <div className="text-xs text-red-950 bg-white/90 p-3 rounded-lg border border-red-200 shadow-xs">
+                  <span className="font-bold">Supervisor Note:</span> {issue.verification_flag_reason}
                 </div>
               )}
             </div>

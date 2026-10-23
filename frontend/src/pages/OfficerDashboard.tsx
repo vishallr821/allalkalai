@@ -193,6 +193,10 @@ export default function OfficerDashboard() {
                                 AI {issue.verification_status.replace(/_/g, " ")}
                               </span>
                             )
+                          ) : issue.verification_status === "flagged" ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-red-100 text-red-800 border border-red-300 animate-pulse">
+                              ⚠ Re-work Required
+                            </span>
                           ) : (
                             (issue.before_photo_url || issue.photo_url) && (
                               <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 inline-flex items-center gap-1">
@@ -200,6 +204,7 @@ export default function OfficerDashboard() {
                               </span>
                             )
                           )}
+
                           {issue.duplicate_group_id && (
                             <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-amber-50 text-amber-800 border border-amber-200 inline-flex items-center gap-1">
                               👥 Clustered Issue

@@ -230,24 +230,27 @@ Return ONLY raw JSON with this exact schema:
       return result;
     }
 
-    // 4. Decision Rules per Specification:
-    // - score >= 0.75 and no tamper -> 'verified'
-    // - 0.40 <= score < 0.75 -> 'needs_review'
-    // - score < 0.40 or tamper -> 'flagged'
+    // 4. Decision Rules:
+    // - Score >= 0.75 & work completed: CAN APPROVE AUTOMATICALLY -> status = "verified"
+    // - Score < 0.75 or tamper or incomplete: WAITS FOR MANUAL APPROVAL from Dept Head -> status = "flagged", reason prefixed with "AI Suggestion: Rejection Recommended"
     let status: "verified" | "needs_review" | "flagged" = "needs_review";
+    let formattedReason = visionResult.reason;
 
-    if (visionResult.tamper_suspected || visionResult.match_score < 0.4 || !visionResult.work_completed) {
+    if (visionResult.tamper_suspected || visionResult.match_score < 0.6 || !visionResult.work_completed) {
       status = "flagged";
+      formattedReason = `AI Suggestion: Rejection Recommended — ${visionResult.reason}`;
     } else if (visionResult.match_score >= 0.75 && !visionResult.tamper_suspected && visionResult.work_completed) {
       status = "verified";
+      formattedReason = `AI Auto-Approved: ${visionResult.reason}`;
     } else {
       status = "needs_review";
+      formattedReason = `AI Check: Manual Review Required (${Math.round(visionResult.match_score * 100)}% match) — ${visionResult.reason}`;
     }
 
     const finalResult: VerificationResult = {
       status,
       score: visionResult.match_score,
-      reason: visionResult.reason,
+      reason: formattedReason,
       tamperSuspected: visionResult.tamper_suspected,
       sameLocation: visionResult.same_location,
       workCompleted: visionResult.work_completed,
@@ -257,6 +260,7 @@ Return ONLY raw JSON with this exact schema:
     await this.persistVerification(issueId, finalResult);
     return finalResult;
   }
+
 
   private resultsCache: Map<string, VerificationResult> = new Map();
 
@@ -275,15 +279,20 @@ Return ONLY raw JSON with this exact schema:
     const supabase = this.getSupabase();
     if (supabase) {
       try {
+        const updatePayload: Record<string, any> = {
+          verification_status: result.status,
+          verification_score: result.score,
+          verification_flag_reason: result.reason,
+          updated_at: new Date().toISOString(),
+        };
+        if (result.status === "verified") {
+          updatePayload.status = "resolved";
+        }
         await supabase
           .from("issues")
-          .update({
-            verification_status: result.status,
-            verification_score: result.score,
-            verification_flag_reason: result.reason,
-            updated_at: new Date().toISOString(),
-          })
+          .update(updatePayload)
           .eq("id", issueId);
+
       } catch (err) {
         console.warn(`[PHOTO_VERIFY] Failed to update issue ${issueId} in DB:`, err);
       }

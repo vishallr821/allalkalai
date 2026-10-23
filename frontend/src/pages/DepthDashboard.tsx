@@ -10,11 +10,14 @@ import {
   Badge,
   Select,
   LoadingState,
+  Textarea,
 } from "../components/ui";
 import StatusBadge from "../components/ui/StatusBadge";
 import DepartmentBadge from "../components/ui/DepartmentBadge";
 import { DashboardLayout } from "../components/layout";
 import { DEPT_COLORS } from "../lib/utils";
+import { verifyResolutionPhotoClient } from "../services/photoVerification";
+
 
 interface Officer {
   id: string;
@@ -207,32 +210,154 @@ export default function DepthDashboard() {
   const [loadingAudit, setLoadingAudit] = useState(false);
   const [fastForwarding, setFastForwarding] = useState(false);
 
-  const reviewQueueIssues = issues.filter(
+  const [queueFilter, setQueueFilter] = useState<"pending" | "verified" | "all">("pending");
+  const [rejectingIssue, setRejectingIssue] = useState<Issue | null>(null);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState<string>("");
+  const [verifyingIssueIds, setVerifyingIssueIds] = useState<string[]>([]);
+
+  // Categorize reviewable issues with before/after photos
+  const allReviewableIssues = issues.filter(
     (i) =>
       Boolean(i.after_photo_url) ||
       Boolean(i.resolution_photo_url) ||
       i.verification_status === "needs_review" ||
       i.verification_status === "flagged" ||
-      (i.status === "resolved" && (Boolean(i.before_photo_url) || Boolean(i.resolution_photo_url)))
+      i.verification_status === "verified" ||
+      (i.status === "resolved" && Boolean(i.before_photo_url))
   );
+
+  const pendingReviewIssues = allReviewableIssues.filter(
+    (i) =>
+      i.verification_status !== "verified" &&
+      !(i.status === "in_progress" && i.verification_status === "flagged")
+  );
+
+  const verifiedReviewIssues = allReviewableIssues.filter(
+    (i) => i.verification_status === "verified"
+  );
+
+  const displayedQueueIssues =
+    queueFilter === "pending"
+      ? pendingReviewIssues
+      : queueFilter === "verified"
+      ? verifiedReviewIssues
+      : allReviewableIssues;
+
+  // Auto-verify issues in review queue that are pending check or have missing score
+  useEffect(() => {
+    if (viewMode !== "verification_queue") return;
+
+    const unverified = issues.filter(
+      (i) =>
+        (Boolean(i.after_photo_url) || Boolean(i.resolution_photo_url)) &&
+        (i.verification_status === "pending" || !i.verification_score) &&
+        !verifyingIssueIds.includes(i.id)
+    );
+
+    if (unverified.length > 0) {
+      unverified.forEach(async (iss) => {
+        setVerifyingIssueIds((prev) => [...prev, iss.id]);
+        try {
+          const res = await verifyResolutionPhotoClient({
+            issueId: iss.id,
+            beforePhotoUrl: iss.before_photo_url || iss.photo_url,
+            afterPhotoUrl: iss.after_photo_url || iss.resolution_photo_url || "",
+            department: iss.department,
+            issueText: iss.issue_text,
+          });
+
+          setIssues((prev) =>
+            prev.map((item) =>
+              item.id === iss.id
+                ? {
+                    ...item,
+                    verification_status: res.status,
+                    verification_score: res.score,
+                    verification_flag_reason: res.reason,
+                    status: res.status === "verified" ? "resolved" : item.status,
+                  }
+                : item
+            )
+          );
+        } catch (err) {
+          console.warn(`[DEPTH_DASHBOARD] Verification check failed for issue ${iss.id}:`, err);
+        } finally {
+          setVerifyingIssueIds((prev) => prev.filter((id) => id !== iss.id));
+        }
+      });
+    }
+  }, [viewMode, issues]);
 
   const handleApproveResolution = async (issueId: string) => {
     try {
-      await supabase.from("issues").update({ verification_status: "verified" }).eq("id", issueId);
-      setIssues(issues.map((i) => (i.id === issueId ? { ...i, verification_status: "verified" } : i)));
+      await supabase
+        .from("issues")
+        .update({
+          status: "resolved",
+          verification_status: "verified",
+          verification_flag_reason: "Verified and approved by Department Head.",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", issueId);
+
+      setIssues(
+        issues.map((i) =>
+          i.id === issueId
+            ? {
+                ...i,
+                status: "resolved",
+                verification_status: "verified",
+                verification_flag_reason: "Verified and approved by Department Head.",
+              }
+            : i
+        )
+      );
     } catch (err) {
       console.error("Failed to approve resolution:", err);
     }
   };
 
-  const handleRejectResolution = async (issueId: string) => {
+  const openRejectModal = (issue: Issue) => {
+    setRejectingIssue(issue);
+    const existingReason = issue.verification_flag_reason || "";
+    const cleanReason = existingReason.replace(/^AI Suggestion: Rejection Recommended — /, "").trim();
+    setRejectionReasonInput(
+      cleanReason || "Resolution photo does not show completed civic repair. Please re-inspect and submit actual proof."
+    );
+  };
+
+  const confirmRejectResolution = async () => {
+    if (!rejectingIssue) return;
+    const finalReason = rejectionReasonInput.trim() || "Resolution rejected by Department Head. On-site re-work required.";
     try {
-      await supabase.from("issues").update({ status: "in_progress", verification_status: "flagged" }).eq("id", issueId);
-      setIssues(issues.map((i) => (i.id === issueId ? { ...i, status: "in_progress", verification_status: "flagged" } : i)));
+      await supabase
+        .from("issues")
+        .update({
+          status: "in_progress",
+          verification_status: "flagged",
+          verification_flag_reason: `Supervisor Rejection: ${finalReason}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", rejectingIssue.id);
+
+      setIssues(
+        issues.map((i) =>
+          i.id === rejectingIssue.id
+            ? {
+                ...i,
+                status: "in_progress",
+                verification_status: "flagged",
+                verification_flag_reason: `Supervisor Rejection: ${finalReason}`,
+              }
+            : i
+        )
+      );
+      setRejectingIssue(null);
     } catch (err) {
       console.error("Failed to reject resolution:", err);
     }
   };
+
 
   const fetchEscalationAudit = async () => {
     try {
@@ -533,12 +658,13 @@ export default function DepthDashboard() {
             }`}
           >
             🔍 Review & Approvals
-            {reviewQueueIssues.length > 0 && (
+            {pendingReviewIssues.length > 0 && (
               <span className="bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full font-bold">
-                {reviewQueueIssues.length}
+                {pendingReviewIssues.length}
               </span>
             )}
           </button>
+
         </div>
 
         {/* Error message */}
@@ -699,120 +825,287 @@ export default function DepthDashboard() {
                     Review completed field tasks with multimodal Before/After photos and automated AI verification scores.
                   </p>
                 </div>
-                <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium">
-                  {reviewQueueIssues.length} In Review Queue
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setQueueFilter("pending")}
+                    className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-all ${
+                      queueFilter === "pending"
+                        ? "bg-amber-600 text-white shadow-xs"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    Pending Review ({pendingReviewIssues.length})
+                  </button>
+                  <button
+                    onClick={() => setQueueFilter("verified")}
+                    className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-all ${
+                      queueFilter === "verified"
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    Verified ({verifiedReviewIssues.length})
+                  </button>
+                  <button
+                    onClick={() => setQueueFilter("all")}
+                    className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-all ${
+                      queueFilter === "all"
+                        ? "bg-slate-800 text-white shadow-xs"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    All ({allReviewableIssues.length})
+                  </button>
+                </div>
               </div>
             </Card>
 
-            {reviewQueueIssues.length === 0 ? (
+            {displayedQueueIssues.length === 0 ? (
               <Card>
                 <div className="text-center py-10 space-y-2">
                   <p className="text-3xl">✨</p>
-                  <h3 className="text-base font-semibold text-slate-800">No Pending Approvals</h3>
+                  <h3 className="text-base font-semibold text-slate-800">
+                    {queueFilter === "pending"
+                      ? "No Pending Approvals"
+                      : queueFilter === "verified"
+                      ? "No Verified Tasks Yet"
+                      : "No Tasks In Review"}
+                  </h3>
                   <p className="text-sm text-slate-500 max-w-md mx-auto">
-                    All resolution photos have been verified or no tasks are currently awaiting supervisor sign-off.
+                    {queueFilter === "pending"
+                      ? "All field resolution photos have been verified or no tasks are currently awaiting supervisor sign-off."
+                      : "Tasks will appear here once resolution photos are submitted and verified."}
                   </p>
                 </div>
               </Card>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {reviewQueueIssues.map((issue) => (
-                  <Card key={issue.id} className="space-y-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <DepartmentBadge department={issue.department as any} />
-                      <span
-                        className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                          issue.verification_status === "verified"
-                            ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                            : issue.verification_status === "flagged"
-                            ? "bg-red-100 text-red-800 border border-red-300"
-                            : "bg-amber-100 text-amber-800 border border-amber-300"
-                        }`}
-                      >
-                        {issue.verification_status || "Needs Review"}
-                      </span>
-                    </div>
+                {displayedQueueIssues.map((issue) => {
+                  const isVerified = issue.verification_status === "verified";
+                  const isRejected = issue.status === "in_progress" && issue.verification_status === "flagged";
+                  const isAISuggestsReject = issue.verification_status === "flagged" && !isRejected;
+                  const isAnalyzing = verifyingIssueIds.includes(issue.id) || issue.verification_status === "pending";
 
-                    <p className="text-sm text-slate-800 font-semibold leading-snug">
-                      {issue.issue_text}
-                    </p>
-
-                    {/* Before & After Viewer */}
-                    <div className="grid grid-cols-2 gap-2 bg-slate-100/70 p-2 rounded-xl">
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase">Before Photo</span>
-                        <div className="aspect-4/3 rounded-lg overflow-hidden bg-slate-200">
-                          {issue.before_photo_url || issue.photo_url ? (
-                            <img
-                              src={issue.before_photo_url || issue.photo_url || ""}
-                              alt="Before"
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
-                              No before photo
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-bold text-emerald-700 uppercase">After Resolution</span>
-                        <div className="aspect-4/3 rounded-lg overflow-hidden bg-slate-200">
-                          {issue.after_photo_url || issue.resolution_photo_url ? (
-                            <img
-                              src={issue.after_photo_url || issue.resolution_photo_url || ""}
-                              alt="After"
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
-                              No after photo
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* AI Scoring Note */}
-                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-slate-700">AI Confidence:</span>
-                        <span className="font-mono font-bold text-violet-700">
-                          {issue.verification_score ? `${Math.round(issue.verification_score * 100)}% Match` : "Automated Check Pending"}
+                  return (
+                    <Card key={issue.id} className="space-y-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <DepartmentBadge department={issue.department as any} />
+                        <span
+                          className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                            isVerified
+                              ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                              : isRejected
+                              ? "bg-red-100 text-red-800 border border-red-300"
+                              : isAISuggestsReject
+                              ? "bg-red-100 text-red-800 border border-red-300 animate-pulse"
+                              : isAnalyzing
+                              ? "bg-blue-100 text-blue-800 border border-blue-300 animate-pulse"
+                              : "bg-amber-100 text-amber-800 border border-amber-300"
+                          }`}
+                        >
+                          {isVerified
+                            ? "✓ Verified"
+                            : isRejected
+                            ? "✕ Re-work Required"
+                            : isAISuggestsReject
+                            ? "⚠ AI Suggests Reject"
+                            : isAnalyzing
+                            ? "Analyzing..."
+                            : "Needs Review"}
                         </span>
                       </div>
-                      {issue.verification_flag_reason && (
-                        <p className="text-red-700 text-[11px]">
-                          <strong>Flag:</strong> {issue.verification_flag_reason}
-                        </p>
-                      )}
-                    </div>
 
-                    {/* Approval / Rejection Actions */}
-                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
-                      <Button
-                        variant="primary"
-                        onClick={() => handleApproveResolution(issue.id)}
-                        className="flex-1 text-xs bg-emerald-600 hover:bg-emerald-700"
-                      >
-                        ✓ Approve & Verify
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => handleRejectResolution(issue.id)}
-                        className="text-xs text-red-700 hover:bg-red-50 border-red-200"
-                      >
-                        Reject / Re-work
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
+                      <p className="text-sm text-slate-800 font-semibold leading-snug">
+                        {issue.issue_text}
+                      </p>
+
+                      {/* Before & After Viewer */}
+                      <div className="grid grid-cols-2 gap-2 bg-slate-100/70 p-2 rounded-xl">
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase">Before Photo</span>
+                          <div className="aspect-4/3 rounded-lg overflow-hidden bg-slate-200">
+                            {issue.before_photo_url || issue.photo_url ? (
+                              <img
+                                src={issue.before_photo_url || issue.photo_url || ""}
+                                alt="Before"
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
+                                No before photo
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold text-emerald-700 uppercase">After Resolution</span>
+                          <div className="aspect-4/3 rounded-lg overflow-hidden bg-slate-200">
+                            {issue.after_photo_url || issue.resolution_photo_url ? (
+                              <img
+                                src={issue.after_photo_url || issue.resolution_photo_url || ""}
+                                alt="After"
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
+                                No after photo
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* AI Multimodal Analysis Box */}
+                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-700">AI Confidence:</span>
+                          <span className="font-mono font-bold text-violet-700">
+                            {isAnalyzing
+                              ? "⚡ Multimodal AI Evaluating..."
+                              : issue.verification_score
+                              ? `${Math.round(issue.verification_score * 100)}% Match`
+                              : "Analysis In Progress"}
+                          </span>
+                        </div>
+
+                        {/* AI Recommendation Alert */}
+                        {isAISuggestsReject && (
+                          <div className="bg-red-50 p-2.5 rounded-lg border border-red-200 text-xs space-y-1">
+                            <div className="flex items-center gap-1.5 font-bold text-red-900">
+                              <span>🤖 AI Recommendation: Suggest Reject / Re-work</span>
+                            </div>
+                            <p className="text-red-800 text-[11px] leading-relaxed">
+                              {issue.verification_flag_reason || "Visual mismatch detected between defect and uploaded proof."}
+                            </p>
+                            <p className="text-[10px] text-red-600 font-medium italic">
+                              AI suggests rejection only. Awaiting Department Head manual confirmation below.
+                            </p>
+                          </div>
+                        )}
+
+                        {isVerified && (
+                          <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200 text-[11px] text-emerald-800 font-medium flex items-center gap-1.5">
+                            <span>✓</span>
+                            <span>{issue.verification_flag_reason || "Verified and approved by Department Head."}</span>
+                          </div>
+                        )}
+
+                        {isRejected && (
+                          <div className="bg-red-50 p-2 rounded-lg border border-red-200 text-[11px] text-red-800 font-medium flex items-center gap-1.5">
+                            <span>✕</span>
+                            <span>{issue.verification_flag_reason || "Rejected by supervisor. Sent back for re-work."}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Action States */}
+                      {isVerified ? (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 text-xs text-emerald-900 font-bold">
+                            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white inline-flex items-center justify-center text-[10px]">✓</span>
+                            <span>Resolution Approved & Verified</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => openRejectModal(issue)}
+                            className="text-xs text-red-600 hover:text-red-800 hover:underline font-semibold whitespace-nowrap"
+                          >
+                            Request Re-work
+                          </button>
+                        </div>
+                      ) : isRejected ? (
+                        <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 text-xs text-red-900 font-bold">
+                            <span className="w-5 h-5 rounded-full bg-red-600 text-white inline-flex items-center justify-center text-[10px]">✕</span>
+                            <span>Resolution Rejected — Re-work Required</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleApproveResolution(issue.id)}
+                            className="text-xs text-emerald-700 hover:text-emerald-900 hover:underline font-semibold whitespace-nowrap"
+                          >
+                            Override & Approve
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                          <Button
+                            variant="primary"
+                            onClick={() => handleApproveResolution(issue.id)}
+                            className="flex-1 text-xs bg-emerald-600 hover:bg-emerald-700"
+                          >
+                            {isAISuggestsReject ? "✓ Override AI & Approve" : "✓ Approve & Verify"}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => openRejectModal(issue)}
+                            className="text-xs text-red-700 hover:bg-red-50 border-red-200"
+                          >
+                            {isAISuggestsReject ? "Confirm Reject & Re-work" : "Reject / Re-work"}
+                          </Button>
+                        </div>
+                      )}
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Rejection Modal */}
+            {rejectingIssue && (
+              <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+                <Card className="w-full max-w-md space-y-4 shadow-2xl">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <h3 className="font-bold text-red-800 text-base flex items-center gap-2">
+                      <span>✕</span> Reject Resolution & Request Re-work
+                    </h3>
+                    <button
+                      onClick={() => setRejectingIssue(null)}
+                      className="text-slate-400 hover:text-slate-600 text-lg font-bold"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <p className="text-xs text-slate-600">
+                    Issue: <strong>{rejectingIssue.issue_text}</strong>
+                  </p>
+
+                  <Textarea
+                    label="Reason for Rejection / Re-work Instructions"
+                    value={rejectionReasonInput}
+                    onChange={(e) => setRejectionReasonInput(e.target.value)}
+                    placeholder="Explain why the resolution was rejected and what specific physical work must be redone..."
+                    className="h-28 text-xs"
+                  />
+
+                  <p className="text-[11px] text-amber-700 bg-amber-50 p-2 rounded border border-amber-200">
+                    The assigned field officer will receive this note and the ticket will return to &quot;In Progress&quot; requiring fresh on-site resolution evidence.
+                  </p>
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => setRejectingIssue(null)}
+                      className="text-xs"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={confirmRejectResolution}
+                      className="text-xs bg-red-600 hover:bg-red-700 text-white"
+                    >
+                      Confirm Rejection & Send Re-work
+                    </Button>
+                  </div>
+                </Card>
               </div>
             )}
           </div>
         ) : (
+
           /* KANBAN BOARD VIEW */
           <>
             {/* Stat cards */}
