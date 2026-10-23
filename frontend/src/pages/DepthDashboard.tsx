@@ -35,6 +35,7 @@ export default function DepthDashboard() {
   const [loading, setLoading] = useState(true);
   const [assigningIssueId, setAssigningIssueId] = useState<string | null>(null);
   const [selectedOfficer, setSelectedOfficer] = useState<string>("");
+  const [duplicateGroups, setDuplicateGroups] = useState<Record<string, any>>({});
 
   useEffect(() => {
     const fetchData = async () => {
@@ -76,6 +77,17 @@ export default function DepthDashboard() {
 
         if (issuesError) throw issuesError;
         setIssues(issuesData || []);
+
+        const { data: groupsData } = await supabase
+          .from("duplicate_groups")
+          .select("*")
+          .eq("department", dept);
+
+        const groupMap: Record<string, any> = {};
+        (groupsData || []).forEach((g: any) => {
+          groupMap[g.id] = g;
+        });
+        setDuplicateGroups(groupMap);
 
         const { data: officersData, error: officersError } = await supabase
           .from("profiles")
@@ -162,38 +174,79 @@ export default function DepthDashboard() {
 
       console.log(`[PIPELINE_STEP_6a] Writing assigned_officer_id: "${officerId}" (type: ${typeof officerId}, length: ${officerId.length})`);
 
-      const { error: updateError } = await supabase
-        .from("issues")
-        .update({
-          assigned_officer_id: officerId,
-          status: "assigned",
-          sla_deadline: slaDeadline.toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", issueId);
+      const targetIssue = issues.find((i) => i.id === issueId);
+      const clusterGroupId = targetIssue?.duplicate_group_id;
 
-      if (updateError) throw updateError;
+      if (clusterGroupId) {
+        // Cascade assignment to ALL issues in the same duplicate cluster so dept head only assigns once!
+        const { error: updateError } = await supabase
+          .from("issues")
+          .update({
+            assigned_officer_id: officerId,
+            status: "assigned",
+            sla_deadline: slaDeadline.toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("duplicate_group_id", clusterGroupId);
 
-      setIssues(
-        issues.map((issue) =>
-          issue.id === issueId
-            ? {
-                ...issue,
-                assigned_officer_id: officerId,
-                status: "assigned" as const,
-                sla_deadline: slaDeadline.toISOString(),
-              }
-            : issue
-        )
-      );
+        if (updateError) throw updateError;
 
-      setOfficers(
-        officers.map((officer) =>
-          officer.id === officerId
-            ? { ...officer, currentWorkload: officer.currentWorkload + 1 }
-            : officer
-        )
-      );
+        const clusteredCount = issues.filter((i) => i.duplicate_group_id === clusterGroupId).length;
+
+        setIssues(
+          issues.map((issue) =>
+            issue.duplicate_group_id === clusterGroupId
+              ? {
+                  ...issue,
+                  assigned_officer_id: officerId,
+                  status: "assigned" as const,
+                  sla_deadline: slaDeadline.toISOString(),
+                }
+              : issue
+          )
+        );
+
+        setOfficers(
+          officers.map((officer) =>
+            officer.id === officerId
+              ? { ...officer, currentWorkload: officer.currentWorkload + clusteredCount }
+              : officer
+          )
+        );
+      } else {
+        const { error: updateError } = await supabase
+          .from("issues")
+          .update({
+            assigned_officer_id: officerId,
+            status: "assigned",
+            sla_deadline: slaDeadline.toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", issueId);
+
+        if (updateError) throw updateError;
+
+        setIssues(
+          issues.map((issue) =>
+            issue.id === issueId
+              ? {
+                  ...issue,
+                  assigned_officer_id: officerId,
+                  status: "assigned" as const,
+                  sla_deadline: slaDeadline.toISOString(),
+                }
+              : issue
+          )
+        );
+
+        setOfficers(
+          officers.map((officer) =>
+            officer.id === officerId
+              ? { ...officer, currentWorkload: officer.currentWorkload + 1 }
+              : officer
+          )
+        );
+      }
 
       setSelectedOfficer("");
     } catch (err) {
@@ -1162,8 +1215,179 @@ export default function DepthDashboard() {
                       {getIssuesByStatus(status).length}
                     </span>
                   </h3>
-                  {getIssuesByStatus(status).map((issue) => (
-                    <Card key={issue.id} accentColor={status === "escalated" ? "#EF4444" : deptColor}>
+                  {getIssuesByStatus(status).map((issue) => {
+                    const clusterGroup = issue.duplicate_group_id ? duplicateGroups[issue.duplicate_group_id] : null;
+                    const isCanonical = !clusterGroup?.canonical_issue_id || clusterGroup.canonical_issue_id === issue.id;
+                    const affectedCount = clusterGroup?.affected_citizens_count || 2;
+
+                    return (
+                      <Card key={issue.id} accentColor={status === "escalated" ? "#EF4444" : deptColor}>
+                        <div className="space-y-2">
+                          <div className="flex gap-2 items-center flex-wrap">
+                            <DepartmentBadge department={issue.department as any} />
+                            <StatusBadge status={issue.status as any} />
+                            {isSlaPassed(issue.sla_deadline, issue.status) && (
+                              <Badge label="Overdue" color="#EF4444" />
+                            )}
+                            {issue.duplicate_group_id && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-900 border border-amber-300 inline-flex items-center gap-1 shadow-2xs">
+                                👥 Clustered Grievance
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-800 font-medium line-clamp-2">
+                            {issue.issue_text}
+                          </p>
+
+                          {issue.duplicate_group_id && (
+                            <div className="bg-amber-50/90 border border-amber-200 rounded-lg p-2 text-xs space-y-1">
+                              <div className="flex items-center justify-between font-bold text-amber-900">
+                                <span className="flex items-center gap-1">
+                                  👥 {isCanonical ? "Consolidated Work Order" : "Clustered Duplicate Report"}
+                                </span>
+                                <span className="bg-amber-200/80 text-amber-900 px-1.5 py-0.2 rounded text-[10px]">
+                                  {affectedCount} reports
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-amber-800 leading-tight">
+                                {isCanonical
+                                  ? `${affectedCount} citizens reported this issue in the same area. Assigning assigns the entire cluster.`
+                                  : "Linked with primary work order. Auto-assigned together."}
+                              </p>
+                            </div>
+                          )}
+
+                          {issue.priority && (
+                            <p className="text-xs text-slate-500">
+                              Priority: {issue.priority}
+                            </p>
+                          )}
+                          {issue.deadline && (
+                            <p className="text-xs text-slate-500">
+                              Due: {new Date(issue.deadline).toLocaleDateString()}
+                            </p>
+                          )}
+                          {(issue.before_photo_url || issue.photo_url || issue.after_photo_url || issue.resolution_photo_url) && (
+                            <div className="flex gap-2 pt-1 pb-1">
+                              {(issue.before_photo_url || issue.photo_url) && (
+                                <div className="relative">
+                                  <img
+                                    src={issue.before_photo_url || issue.photo_url || ""}
+                                    alt="Before"
+                                    className="w-10 h-10 rounded object-cover border border-slate-200"
+                                  />
+                                  <span className="absolute bottom-0 left-0 bg-slate-900/80 text-[7px] text-white px-1 rounded-tr">
+                                    Before
+                                  </span>
+                                </div>
+                              )}
+                              {(issue.after_photo_url || issue.resolution_photo_url) && (
+                                <div className="relative">
+                                  <img
+                                    src={issue.after_photo_url || issue.resolution_photo_url || ""}
+                                    alt="After"
+                                    className="w-10 h-10 rounded object-cover border border-emerald-300"
+                                  />
+                                  <span className="absolute bottom-0 left-0 bg-emerald-700 text-[7px] text-white px-1 rounded-tr">
+                                    After
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {issue.status === "escalated" && (
+                            <div className="mt-2 pt-2 border-t border-red-200 text-xs text-red-700 bg-red-50 p-2.5 rounded space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <p className="font-bold">⚠ Escalated to Supervisor</p>
+                                <button
+                                  onClick={() => setViewMode("escalation_audit")}
+                                  className="text-[10px] text-red-800 underline font-semibold hover:text-red-950"
+                                >
+                                  Audit Trail →
+                                </button>
+                              </div>
+                              <p className="text-[11px]">
+                                {issue.escalation_reason || "Resolution deadline breached."}
+                              </p>
+                              {issue.escalation_notice && (
+                                <details className="mt-1.5 text-[11px] font-mono bg-white/90 p-2 rounded border border-red-200 cursor-pointer">
+                                  <summary className="font-sans font-semibold text-red-900 cursor-pointer">
+                                    📄 View Official Escalation Notice
+                                  </summary>
+                                  <pre className="mt-2 whitespace-pre-wrap text-[10px] text-slate-800 font-mono">
+                                    {issue.escalation_notice}
+                                  </pre>
+                                </details>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {(status === "new" || !issue.assigned_officer_id) && status !== "resolved" && (
+                          <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
+                            {!issue.assigned_officer_id && status !== "new" && (
+                              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded block">
+                                ⚠ Needs Officer Assignment
+                              </span>
+                            )}
+                            <Select
+                              id={`officer-${issue.id}`}
+                              value={assigningIssueId === issue.id ? selectedOfficer : ""}
+                              onChange={(e) => setSelectedOfficer(e.target.value)}
+                              disabled={assigningIssueId === issue.id}
+                              className="text-xs"
+                            >
+                              <option value="">Select officer...</option>
+                              {officers.map((officer) => (
+                                <option key={officer.id} value={officer.id}>
+                                  {officer.name} ({officer.currentWorkload})
+                                </option>
+                              ))}
+                            </Select>
+                            <Button
+                              variant="primary"
+                              onClick={() => handleAssignOfficer(issue.id, selectedOfficer)}
+                              disabled={assigningIssueId === issue.id || !selectedOfficer}
+                              className="w-full text-xs"
+                            >
+                              {assigningIssueId === issue.id
+                                ? "Assigning..."
+                                : issue.duplicate_group_id
+                                ? `Assign Cluster (${affectedCount} Reports)`
+                                : "Assign"}
+                            </Button>
+                          </div>
+                        )}
+                      </Card>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            {/* Mobile Tabbed View */}
+            <div className="lg:hidden space-y-4">
+              <div className="flex gap-1 overflow-x-auto pb-2">
+                {["new", "assigned", "in_progress", "escalated", "resolved"].map((status) => (
+                  <Button
+                    key={status}
+                    variant={activeTab === status ? "primary" : "secondary"}
+                    onClick={() => setActiveTab(status)}
+                    className="text-xs whitespace-nowrap"
+                  >
+                    {status.replace(/_/g, " ")} ({getIssuesByStatus(status).length})
+                  </Button>
+                ))}
+              </div>
+
+              <div className="space-y-3">
+                {getIssuesByStatus(activeTab).map((issue) => {
+                  const clusterGroup = issue.duplicate_group_id ? duplicateGroups[issue.duplicate_group_id] : null;
+                  const isCanonical = !clusterGroup?.canonical_issue_id || clusterGroup.canonical_issue_id === issue.id;
+                  const affectedCount = clusterGroup?.affected_citizens_count || 2;
+
+                  return (
+                    <Card key={issue.id} accentColor={issue.status === "escalated" ? "#EF4444" : deptColor}>
                       <div className="space-y-2">
                         <div className="flex gap-2 items-center flex-wrap">
                           <DepartmentBadge department={issue.department as any} />
@@ -1171,50 +1395,36 @@ export default function DepthDashboard() {
                           {isSlaPassed(issue.sla_deadline, issue.status) && (
                             <Badge label="Overdue" color="#EF4444" />
                           )}
+                          {issue.duplicate_group_id && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-900 border border-amber-300 inline-flex items-center gap-1 shadow-2xs">
+                              👥 Clustered Grievance
+                            </span>
+                          )}
                         </div>
                         <p className="text-sm text-slate-800 font-medium line-clamp-2">
                           {issue.issue_text}
                         </p>
-                        {issue.priority && (
-                          <p className="text-xs text-slate-500">
-                            Priority: {issue.priority}
-                          </p>
-                        )}
-                        {issue.deadline && (
-                          <p className="text-xs text-slate-500">
-                            Due: {new Date(issue.deadline).toLocaleDateString()}
-                          </p>
-                        )}
-                        {(issue.before_photo_url || issue.photo_url || issue.after_photo_url || issue.resolution_photo_url) && (
-                          <div className="flex gap-2 pt-1 pb-1">
-                            {(issue.before_photo_url || issue.photo_url) && (
-                              <div className="relative">
-                                <img
-                                  src={issue.before_photo_url || issue.photo_url || ""}
-                                  alt="Before"
-                                  className="w-10 h-10 rounded object-cover border border-slate-200"
-                                />
-                                <span className="absolute bottom-0 left-0 bg-slate-900/80 text-[7px] text-white px-1 rounded-tr">
-                                  Before
-                                </span>
-                              </div>
-                            )}
-                            {(issue.after_photo_url || issue.resolution_photo_url) && (
-                              <div className="relative">
-                                <img
-                                  src={issue.after_photo_url || issue.resolution_photo_url || ""}
-                                  alt="After"
-                                  className="w-10 h-10 rounded object-cover border border-emerald-300"
-                                />
-                                <span className="absolute bottom-0 left-0 bg-emerald-700 text-[7px] text-white px-1 rounded-tr">
-                                  After
-                                </span>
-                              </div>
-                            )}
+
+                        {issue.duplicate_group_id && (
+                          <div className="bg-amber-50/90 border border-amber-200 rounded-lg p-2 text-xs space-y-1">
+                            <div className="flex items-center justify-between font-bold text-amber-900">
+                              <span className="flex items-center gap-1">
+                                👥 {isCanonical ? "Consolidated Work Order" : "Clustered Duplicate Report"}
+                              </span>
+                              <span className="bg-amber-200/80 text-amber-900 px-1.5 py-0.2 rounded text-[10px]">
+                                {affectedCount} reports
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-amber-800 leading-tight">
+                              {isCanonical
+                                ? `${affectedCount} citizens reported this in the same area. Assigning assigns the entire cluster.`
+                                : "Linked with primary work order. Auto-assigned together."}
+                            </p>
                           </div>
                         )}
+
                         {issue.status === "escalated" && (
-                          <div className="mt-2 pt-2 border-t border-red-200 text-xs text-red-700 bg-red-50 p-2.5 rounded space-y-1.5">
+                          <div className="text-xs text-red-700 bg-red-50 p-2.5 rounded space-y-1.5">
                             <div className="flex items-center justify-between">
                               <p className="font-bold">⚠ Escalated to Supervisor</p>
                               <button
@@ -1239,135 +1449,46 @@ export default function DepthDashboard() {
                             )}
                           </div>
                         )}
-                      </div>
 
-                      {(status === "new" || !issue.assigned_officer_id) && status !== "resolved" && (
-                        <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
-                          {!issue.assigned_officer_id && status !== "new" && (
-                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded block">
-                              ⚠ Needs Officer Assignment
-                            </span>
-                          )}
-                          <Select
-                            id={`officer-${issue.id}`}
-                            value={assigningIssueId === issue.id ? selectedOfficer : ""}
-                            onChange={(e) => setSelectedOfficer(e.target.value)}
-                            disabled={assigningIssueId === issue.id}
-                            className="text-xs"
-                          >
-                            <option value="">Select officer...</option>
-                            {officers.map((officer) => (
-                              <option key={officer.id} value={officer.id}>
-                                {officer.name} ({officer.currentWorkload})
-                              </option>
-                            ))}
-                          </Select>
-                          <Button
-                            variant="primary"
-                            onClick={() => handleAssignOfficer(issue.id, selectedOfficer)}
-                            disabled={assigningIssueId === issue.id || !selectedOfficer}
-                            className="w-full text-xs"
-                          >
-                            {assigningIssueId === issue.id ? "Assigning..." : "Assign"}
-                          </Button>
-                        </div>
-                      )}
-                    </Card>
-                  ))}
-                </div>
-              ))}
-            </div>
-
-            {/* Mobile Tabbed View */}
-            <div className="lg:hidden space-y-4">
-              <div className="flex gap-1 overflow-x-auto pb-2">
-                {["new", "assigned", "in_progress", "escalated", "resolved"].map((status) => (
-                  <Button
-                    key={status}
-                    variant={activeTab === status ? "primary" : "secondary"}
-                    onClick={() => setActiveTab(status)}
-                    className="text-xs whitespace-nowrap"
-                  >
-                    {status.replace(/_/g, " ")} ({getIssuesByStatus(status).length})
-                  </Button>
-                ))}
-              </div>
-
-              <div className="space-y-3">
-                {getIssuesByStatus(activeTab).map((issue) => (
-                  <Card key={issue.id} accentColor={issue.status === "escalated" ? "#EF4444" : deptColor}>
-                    <div className="space-y-2">
-                      <div className="flex gap-2 items-center flex-wrap">
-                        <DepartmentBadge department={issue.department as any} />
-                        <StatusBadge status={issue.status as any} />
-                        {isSlaPassed(issue.sla_deadline, issue.status) && (
-                          <Badge label="Overdue" color="#EF4444" />
+                        {(activeTab === "new" || !issue.assigned_officer_id) && issue.status !== "resolved" && (
+                          <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
+                            {!issue.assigned_officer_id && issue.status !== "new" && (
+                              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded block">
+                                ⚠ Needs Officer Assignment
+                              </span>
+                            )}
+                            <Select
+                              id={`officer-m-${issue.id}`}
+                              value={assigningIssueId === issue.id ? selectedOfficer : ""}
+                              onChange={(e) => setSelectedOfficer(e.target.value)}
+                              disabled={assigningIssueId === issue.id}
+                              className="text-xs"
+                            >
+                              <option value="">Select officer...</option>
+                              {officers.map((officer) => (
+                                <option key={officer.id} value={officer.id}>
+                                  {officer.name} ({officer.currentWorkload})
+                                </option>
+                              ))}
+                            </Select>
+                            <Button
+                              variant="primary"
+                              onClick={() => handleAssignOfficer(issue.id, selectedOfficer)}
+                              disabled={assigningIssueId === issue.id || !selectedOfficer}
+                              className="w-full text-xs"
+                            >
+                              {assigningIssueId === issue.id
+                                ? "Assigning..."
+                                : issue.duplicate_group_id
+                                ? `Assign Cluster (${affectedCount} Reports)`
+                                : "Assign"}
+                            </Button>
+                          </div>
                         )}
                       </div>
-                      <p className="text-sm text-slate-800 font-medium line-clamp-2">
-                        {issue.issue_text}
-                      </p>
-                      {issue.status === "escalated" && (
-                        <div className="text-xs text-red-700 bg-red-50 p-2.5 rounded space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <p className="font-bold">⚠ Escalated to Supervisor</p>
-                            <button
-                              onClick={() => setViewMode("escalation_audit")}
-                              className="text-[10px] text-red-800 underline font-semibold hover:text-red-950"
-                            >
-                              Audit Trail →
-                            </button>
-                          </div>
-                          <p className="text-[11px]">
-                            {issue.escalation_reason || "Resolution deadline breached."}
-                          </p>
-                          {issue.escalation_notice && (
-                            <details className="mt-1.5 text-[11px] font-mono bg-white/90 p-2 rounded border border-red-200 cursor-pointer">
-                              <summary className="font-sans font-semibold text-red-900 cursor-pointer">
-                                📄 View Official Escalation Notice
-                              </summary>
-                              <pre className="mt-2 whitespace-pre-wrap text-[10px] text-slate-800 font-mono">
-                                {issue.escalation_notice}
-                              </pre>
-                            </details>
-                          )}
-                        </div>
-                      )}
-
-                      {(activeTab === "new" || !issue.assigned_officer_id) && issue.status !== "resolved" && (
-                        <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
-                          {!issue.assigned_officer_id && issue.status !== "new" && (
-                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded block">
-                              ⚠ Needs Officer Assignment
-                            </span>
-                          )}
-                          <Select
-                            id={`officer-m-${issue.id}`}
-                            value={assigningIssueId === issue.id ? selectedOfficer : ""}
-                            onChange={(e) => setSelectedOfficer(e.target.value)}
-                            disabled={assigningIssueId === issue.id}
-                            className="text-xs"
-                          >
-                            <option value="">Select officer...</option>
-                            {officers.map((officer) => (
-                              <option key={officer.id} value={officer.id}>
-                                {officer.name} ({officer.currentWorkload})
-                              </option>
-                            ))}
-                          </Select>
-                          <Button
-                            variant="primary"
-                            onClick={() => handleAssignOfficer(issue.id, selectedOfficer)}
-                            disabled={assigningIssueId === issue.id || !selectedOfficer}
-                            className="w-full text-xs"
-                          >
-                            {assigningIssueId === issue.id ? "Assigning..." : "Assign"}
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </Card>
-                ))}
+                    </Card>
+                  );
+                })}
               </div>
             </div>
           </>

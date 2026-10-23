@@ -423,14 +423,85 @@ export default function CitizenSubmit() {
         }
 
         for (const item of detectedDepts) {
+          let assignedClusterId: string | null = null;
+          let isDuplicate = false;
+
+          // Spatial duplicate check in vicinity (~150m)
+          try {
+            let candidateQuery = supabase
+              .from("issues")
+              .select("id, lat, lng, duplicate_group_id, issue_text")
+              .eq("department", item.department)
+              .in("status", ["new", "assigned", "in_progress", "escalated"]);
+
+            if (effectiveCoords?.lat && effectiveCoords?.lng) {
+              const latDelta = 0.0015;
+              const lngDelta = 0.0015;
+              candidateQuery = candidateQuery
+                .gte("lat", effectiveCoords.lat - latDelta)
+                .lte("lat", effectiveCoords.lat + latDelta)
+                .gte("lng", effectiveCoords.lng - lngDelta)
+                .lte("lng", effectiveCoords.lng + lngDelta);
+            }
+
+            const { data: nearbyCandidates } = await candidateQuery.limit(5);
+            if (nearbyCandidates && nearbyCandidates.length > 0) {
+              const matchedCandidate = nearbyCandidates[0];
+              isDuplicate = true;
+
+              if (matchedCandidate.duplicate_group_id) {
+                assignedClusterId = matchedCandidate.duplicate_group_id;
+                const { data: grp } = await supabase
+                  .from("duplicate_groups")
+                  .select("affected_citizens_count")
+                  .eq("id", assignedClusterId)
+                  .single();
+                const newCount = (grp?.affected_citizens_count || 1) + 1;
+                await supabase
+                  .from("duplicate_groups")
+                  .update({ affected_citizens_count: newCount })
+                  .eq("id", assignedClusterId);
+              } else {
+                const { data: newGrp } = await supabase
+                  .from("duplicate_groups")
+                  .insert({
+                    department: item.department,
+                    category: item.text.slice(0, 50),
+                    lat: effectiveCoords?.lat || matchedCandidate.lat,
+                    lng: effectiveCoords?.lng || matchedCandidate.lng,
+                    affected_citizens_count: 2,
+                    canonical_issue_id: matchedCandidate.id,
+                  })
+                  .select("id")
+                  .single();
+
+                if (newGrp) {
+                  assignedClusterId = newGrp.id;
+                  await supabase
+                    .from("issues")
+                    .update({ duplicate_group_id: assignedClusterId, priority: "high" })
+                    .eq("id", matchedCandidate.id);
+                }
+              }
+
+              sessionStorage.setItem(
+                `duplicate_notice_${ticketId}`,
+                `1 other citizen has also reported this problem in your immediate vicinity. Consolidated for priority response.`
+              );
+            }
+          } catch (clusterErr) {
+            console.warn("Client fallback clustering error:", clusterErr);
+          }
+
           await supabase.from("issues").insert({
             parent_ticket_id: ticketId,
             department: item.department,
             issue_text: text,
-            priority: item.priority,
+            priority: isDuplicate ? "high" : item.priority,
             status: "new",
             lat: effectiveCoords?.lat ?? null,
             lng: effectiveCoords?.lng ?? null,
+            duplicate_group_id: assignedClusterId,
             before_photo_url: primaryPhotoUrl,
             deadline: new Date(Date.now() + 48 * 3600 * 1000).toISOString().split("T")[0],
             sla_deadline: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),

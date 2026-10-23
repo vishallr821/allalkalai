@@ -31,6 +31,7 @@ export default function CitizenTrack() {
   const [feedbackPanelIssueId, setFeedbackPanelIssueId] = useState<string | null>(null);
   const [rating, setRating] = useState<number | null>(null);
   const [feedback, setFeedback] = useState("");
+  const [clusterCount, setClusterCount] = useState<number>(1);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -65,6 +66,22 @@ export default function CitizenTrack() {
 
         if (issuesError) throw issuesError;
         setIssues(issuesData || []);
+
+        const duplicateGroupIds = (issuesData || [])
+          .map((i: any) => i.duplicate_group_id)
+          .filter(Boolean);
+
+        if (duplicateGroupIds.length > 0) {
+          const { data: groupData } = await supabase
+            .from("duplicate_groups")
+            .select("affected_citizens_count")
+            .in("id", duplicateGroupIds);
+
+          if (groupData && groupData.length > 0) {
+            const maxCount = Math.max(...groupData.map((g: any) => g.affected_citizens_count || 1));
+            setClusterCount(maxCount);
+          }
+        }
 
         if (ticketId) {
           const { data: photoData } = await supabase
@@ -237,7 +254,7 @@ export default function CitizenTrack() {
               <p className="font-semibold text-sm">Similar Complaints Clustered in Your Area</p>
               <p className="text-xs text-amber-800 mt-0.5">
                 {sessionStorage.getItem(`duplicate_notice_${ticketId}`) ||
-                  "1 other citizen has also reported this problem in your immediate vicinity. Consolidated for priority response."}
+                  `${clusterCount > 1 ? clusterCount - 1 : 1} other citizen${clusterCount > 2 ? "s have" : " has"} also reported this problem in your immediate vicinity. Consolidated for priority response.`}
               </p>
             </div>
           </div>
@@ -324,6 +341,11 @@ export default function CitizenTrack() {
                         <StatusBadge status={issue.status as any} />
                         {issue.priority && (
                           <Badge label={issue.priority} color={deptColor} />
+                        )}
+                        {issue.duplicate_group_id && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full">
+                            👥 Clustered Grievance
+                          </span>
                         )}
                       </div>
                       <p className="text-slate-800 font-medium">{issue.issue_text}</p>
